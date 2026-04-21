@@ -49,6 +49,28 @@ function SettingsDialogs({ model }: { model: ReturnType<typeof useSettingsRouteM
   );
 }
 
+function SettingsBackButton({ navigate }: { navigate: ReturnType<typeof useNavigate> }) {
+  return (
+    <div className="fixed top-16 left-4 z-20">
+      <Button
+        aria-label="Go back"
+        onClick={() => {
+          if (window.history.length > 1) {
+            navigate(-1);
+          } else {
+            navigate("/");
+          }
+        }}
+        size="icon-sm"
+        type="button"
+        variant="ghost"
+      >
+        <ArrowLeft weight="regular" />
+      </Button>
+    </div>
+  );
+}
+
 function SettingsContent({
   model,
   navigate,
@@ -58,28 +80,16 @@ function SettingsContent({
 }) {
   return (
     <section aria-label="Settings" className="relative px-4 pt-16 pb-32 md:px-6">
-      <div className="fixed top-16 left-4 z-20">
-        <Button
-          aria-label="Go back"
-          onClick={() => {
-            if (window.history.length > 1) {
-              navigate(-1);
-            } else {
-              navigate("/");
-            }
-          }}
-          size="icon-sm"
-          type="button"
-          variant="ghost"
-        >
-          <ArrowLeft weight="regular" />
-        </Button>
-      </div>
+      <SettingsBackButton navigate={navigate} />
       <div className="mx-auto flex w-full max-w-[816px] flex-col gap-6">
         <div className="space-y-0.5">
-          <h1 className="text-4xl leading-tight font-semibold tracking-[-0.03em] text-[#fafafa]">Settings</h1>
+          <h1 className="text-4xl leading-tight font-semibold tracking-[-0.03em] text-[#fafafa]">
+            Settings
+          </h1>
         </div>
-        {model.errorMessage ? <p className="text-sm text-destructive">{model.errorMessage}</p> : null}
+        {model.errorMessage ? (
+          <p className="text-sm text-destructive">{model.errorMessage}</p>
+        ) : null}
         <div className="space-y-5">
           <DefaultPromptSection
             defaultPromptError={model.settingsForm.formState.errors.defaultPrompt?.message}
@@ -119,14 +129,27 @@ function SettingsContent({
           <HookRegistrationSection
             hasResolvedHookState={model.hasResolvedHookState}
             hooksDetected={model.hooksDetected}
+            runtimeState={model.runtimeState}
             onClearHooks={() => {
               void model.uninstallHooks();
+            }}
+            onPauseLoopndroll={() => {
+              void model.pauseLoopndroll();
             }}
             onRegisterHooks={() => {
               void model.installHooks();
             }}
             onRevealHooksFile={() => {
               void revealHooksFile();
+            }}
+            onResumeLoopndroll={() => {
+              void model.resumeLoopndroll();
+            }}
+            onStartLoopndroll={() => {
+              void model.startLoopndroll();
+            }}
+            onStopLoopndroll={() => {
+              void model.stopLoopndroll();
             }}
           />
         </div>

@@ -11,9 +11,11 @@ import type {
   LoopScope,
   LoopSession,
   LoopSessionPresetSource,
+  LoopndrollRuntimeState,
 } from "../shared/app-rpc";
 import {
   LOOP_PRESET_VALUES,
+  LOOPNDROLL_RUNTIME_STATE_VALUES,
   LOOP_SCOPE_VALUES,
   LOOP_SESSION_SOURCE_VALUES,
 } from "./constants";
@@ -85,7 +87,12 @@ export const AWAIT_REPLY_POLL_INTERVAL_MS = 500;
 export const TELEGRAM_MAX_MESSAGE_LENGTH = 4096;
 export const TELEGRAM_NOTIFICATION_FOOTER =
   "Reply to this message in Telegram to continue this Codex chat.";
-export const TELEGRAM_ALLOWED_UPDATES = ["message", "channel_post", "my_chat_member", "chat_member"];
+export const TELEGRAM_ALLOWED_UPDATES = [
+  "message",
+  "channel_post",
+  "my_chat_member",
+  "chat_member",
+];
 
 export function getLoopndrollPaths(): LoopndrollPaths {
   const appDirectoryPath = join(
@@ -180,6 +187,12 @@ export async function appendHookDebugLog(paths: LoopndrollPaths, entry: Record<s
 
 export function normalizeLoopPreset(value: unknown): LoopPreset | null {
   return LOOP_PRESET_VALUES.includes(value as LoopPreset) ? (value as LoopPreset) : null;
+}
+
+export function normalizeLoopndrollRuntimeState(value: unknown): LoopndrollRuntimeState {
+  return LOOPNDROLL_RUNTIME_STATE_VALUES.includes(value as LoopndrollRuntimeState)
+    ? (value as LoopndrollRuntimeState)
+    : "running";
 }
 
 export function normalizeScope(value: unknown): LoopScope {
@@ -460,7 +473,10 @@ export function notificationInsertFromValue(
   };
 }
 
-export function buildNewSession(sessionId: string, sessionRef: string): typeof sessions.$inferInsert {
+export function buildNewSession(
+  sessionId: string,
+  sessionRef: string,
+): typeof sessions.$inferInsert {
   const timestamp = nowIsoString();
 
   return {
@@ -741,6 +757,7 @@ export function readSnapshotFromDatabase() {
   return {
     defaultPrompt: settingsRow.defaultPrompt,
     scope: normalizeScope(settingsRow.scope),
+    runtimeState: normalizeLoopndrollRuntimeState(settingsRow.runtimeState),
     globalPreset: normalizeLoopPreset(settingsRow.globalPreset),
     globalNotificationId: normalizeGlobalNotificationId(
       notificationRows.map((row) => row.id),

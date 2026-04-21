@@ -13,6 +13,7 @@ export type {
   LoopNotification,
   LoopPreset,
   LoopScope,
+  LoopndrollRuntimeState,
   LoopndrollSnapshot,
   LoopSession,
   TelegramChatOption,
@@ -151,6 +152,26 @@ export async function registerHooks() {
 export async function clearHooks() {
   const rpc = await getAppRpc();
   return rpc?.request.clearHooks();
+}
+
+export async function pauseLoopndroll() {
+  const rpc = await getAppRpc();
+  return rpc?.request.pauseLoopndroll();
+}
+
+export async function resumeLoopndroll() {
+  const rpc = await getAppRpc();
+  return rpc?.request.resumeLoopndroll();
+}
+
+export async function startLoopndroll() {
+  const rpc = await getAppRpc();
+  return rpc?.request.startLoopndroll();
+}
+
+export async function stopLoopndroll() {
+  const rpc = await getAppRpc();
+  return rpc?.request.stopLoopndroll();
 }
 
 export async function revealHooksFile() {

@@ -18,6 +18,7 @@ import {
   ensureDirectory,
   getLoopndrollPaths,
   getSettingsRow,
+  normalizeLoopndrollRuntimeState,
   readSnapshotFromDatabase,
 } from "./loopndroll-core";
 
@@ -191,6 +192,7 @@ async function computeHealth(paths: LoopndrollPaths) {
   const issues: string[] = [];
   const configContents = await readFile(paths.codexConfigPath, "utf8").catch(() => null);
   const hooksDocument = await loadHooksDocument(paths);
+  const runtimeState = normalizeLoopndrollRuntimeState(getSettingsRow().runtimeState);
   const scriptExists = await stat(paths.managedHookPath)
     .then(() => true)
     .catch(() => false);
@@ -204,6 +206,13 @@ async function computeHealth(paths: LoopndrollPaths) {
   const hasManagedUserPromptSubmit = (hookEvents.UserPromptSubmit ?? []).some((group) =>
     (group.hooks ?? []).some((hook) => isManagedHookCommand(hook.command)),
   );
+
+  if (runtimeState === "stopped") {
+    return {
+      registered: false,
+      issues,
+    };
+  }
 
   if (!configContents || !/\bcodex_hooks\s*=\s*true\b/.test(configContents)) {
     issues.push("Codex hooks are not enabled in ~/.codex/config.toml.");
@@ -244,6 +253,17 @@ async function ensureRegistered(paths: LoopndrollPaths) {
   });
 }
 
+async function clearManagedHookRegistration(paths: LoopndrollPaths) {
+  const hooksDocument = await loadHooksDocument(paths);
+  removeManagedHooks(hooksDocument);
+  await writeFile(paths.codexHooksPath, `${JSON.stringify(hooksDocument, null, 2)}\n`, "utf8");
+}
+
+function setRuntimeState(value: "running" | "paused" | "stopped") {
+  const { db } = getLoopndrollDatabase(getLoopndrollPaths().databasePath);
+  db.update(settings).set({ runtimeState: value }).where(eq(settings.id, 1)).run();
+}
+
 export async function loadSnapshot(paths: LoopndrollPaths) {
   getLoopndrollDatabase(paths.databasePath);
   const baseSnapshot = readSnapshotFromDatabase();
@@ -259,7 +279,11 @@ export async function ensureLoopndrollSetup() {
   const paths = getLoopndrollPaths();
   getLoopndrollDatabase(paths.databasePath);
 
-  if (getSettingsRow().hooksAutoRegistration) {
+  const settingsRow = getSettingsRow();
+  if (
+    settingsRow.hooksAutoRegistration &&
+    normalizeLoopndrollRuntimeState(settingsRow.runtimeState) !== "stopped"
+  ) {
     await ensureRegistered(paths);
   }
 
@@ -276,7 +300,10 @@ export async function registerHooks() {
   const { db } = getLoopndrollDatabase(paths.databasePath);
 
   await ensureRegistered(paths);
-  db.update(settings).set({ hooksAutoRegistration: true }).where(eq(settings.id, 1)).run();
+  db.update(settings)
+    .set({ hooksAutoRegistration: true, runtimeState: "running" })
+    .where(eq(settings.id, 1))
+    .run();
 
   return loadSnapshot(paths);
 }
@@ -284,10 +311,7 @@ export async function registerHooks() {
 export async function clearHooks() {
   const paths = getLoopndrollPaths();
   const { db } = getLoopndrollDatabase(paths.databasePath);
-  const hooksDocument = await loadHooksDocument(paths);
-
-  removeManagedHooks(hooksDocument);
-  await writeFile(paths.codexHooksPath, `${JSON.stringify(hooksDocument, null, 2)}\n`, "utf8");
+  await clearManagedHookRegistration(paths);
   db.update(settings).set({ hooksAutoRegistration: false }).where(eq(settings.id, 1)).run();
 
   await appendHookDebugLog(paths, {
@@ -297,6 +321,46 @@ export async function clearHooks() {
   });
 
   return loadSnapshot(paths);
+}
+
+export async function pauseLoopndroll() {
+  const paths = getLoopndrollPaths();
+  setRuntimeState("paused");
+  await appendHookDebugLog(paths, {
+    type: "setup",
+    action: "pause-loopndroll",
+  });
+  return loadSnapshot(paths);
+}
+
+export async function resumeLoopndroll() {
+  const paths = getLoopndrollPaths();
+  setRuntimeState("running");
+  await appendHookDebugLog(paths, {
+    type: "setup",
+    action: "resume-loopndroll",
+  });
+  return loadSnapshot(paths);
+}
+
+export async function stopLoopndroll() {
+  const paths = getLoopndrollPaths();
+  const { db } = getLoopndrollDatabase(paths.databasePath);
+  await clearManagedHookRegistration(paths);
+  db.update(settings)
+    .set({ hooksAutoRegistration: false, runtimeState: "stopped" })
+    .where(eq(settings.id, 1))
+    .run();
+  await appendHookDebugLog(paths, {
+    type: "setup",
+    action: "stop-loopndroll",
+    hooksFilePath: paths.codexHooksPath,
+  });
+  return loadSnapshot(paths);
+}
+
+export async function startLoopndroll() {
+  return registerHooks();
 }
 
 export async function revealHooksFile() {

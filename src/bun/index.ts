@@ -21,8 +21,10 @@ import {
   ensureLoopndrollSetup,
   getTelegramChats as fetchTelegramChats,
   getLoopndrollSnapshot,
+  pauseLoopndroll,
   registerHooks,
   revealHooksFile,
+  resumeLoopndroll,
   saveDefaultPrompt,
   deleteSession,
   setGlobalCompletionCheckConfig,
@@ -33,7 +35,9 @@ import {
   setSessionNotifications as persistSessionNotifications,
   setLoopScope,
   setSessionPreset,
+  startLoopndroll,
   startLoopndrollTelegramBridge,
+  stopLoopndroll,
   updateCompletionCheck,
   updateLoopNotification,
 } from "./loopndroll";
@@ -511,6 +515,62 @@ function getAppRpcRequestHandlers() {
   };
 }
 
+function getLoopndrollSessionRpcRequestHandlers() {
+  return {
+    setSessionNotifications({
+      sessionId,
+      notificationIds,
+    }: {
+      sessionId: string;
+      notificationIds: string[];
+    }) {
+      return persistSessionNotifications(sessionId, notificationIds);
+    },
+    setSessionPreset({
+      sessionId,
+      preset,
+    }: {
+      sessionId: string;
+      preset: Parameters<typeof setSessionPreset>[1];
+    }) {
+      return setSessionPreset(sessionId, preset);
+    },
+    setSessionCompletionCheckConfig({
+      sessionId,
+      completionCheckId,
+      waitForReplyAfterCompletion,
+    }: {
+      sessionId: string;
+      completionCheckId: string | null;
+      waitForReplyAfterCompletion: boolean;
+    }) {
+      return setSessionCompletionCheckConfig(
+        sessionId,
+        completionCheckId,
+        waitForReplyAfterCompletion,
+      );
+    },
+    setSessionArchived({ sessionId, archived }: { sessionId: string; archived: boolean }) {
+      return persistSessionArchived(sessionId, archived);
+    },
+    deleteSession({ sessionId }: { sessionId: string }) {
+      return deleteSession(sessionId);
+    },
+  };
+}
+
+function getLoopndrollLifecycleRpcRequestHandlers() {
+  return {
+    registerHooks,
+    clearHooks,
+    pauseLoopndroll,
+    resumeLoopndroll,
+    startLoopndroll,
+    stopLoopndroll,
+    revealHooksFile,
+  };
+}
+
 function getLoopndrollRpcRequestHandlers() {
   return {
     ensureLoopndrollSetup,
@@ -518,7 +578,11 @@ function getLoopndrollRpcRequestHandlers() {
     saveDefaultPrompt({ defaultPrompt }: { defaultPrompt: string }) {
       return saveDefaultPrompt(defaultPrompt);
     },
-    createNotification({ notification }: { notification: Parameters<typeof createLoopNotification>[0] }) {
+    createNotification({
+      notification,
+    }: {
+      notification: Parameters<typeof createLoopNotification>[0];
+    }) {
       return createLoopNotification(notification);
     },
     createCompletionCheck({
@@ -545,9 +609,6 @@ function getLoopndrollRpcRequestHandlers() {
     }) {
       return updateCompletionCheck(completionCheck);
     },
-    setSessionNotifications({ sessionId, notificationIds }: { sessionId: string; notificationIds: string[] }) {
-      return persistSessionNotifications(sessionId, notificationIds);
-    },
     deleteNotification({ notificationId }: { notificationId: string }) {
       return deleteLoopNotification(notificationId);
     },
@@ -572,33 +633,8 @@ function getLoopndrollRpcRequestHandlers() {
     }) {
       return setGlobalCompletionCheckConfig(completionCheckId, waitForReplyAfterCompletion);
     },
-    setSessionPreset({ sessionId, preset }: { sessionId: string; preset: Parameters<typeof setSessionPreset>[1] }) {
-      return setSessionPreset(sessionId, preset);
-    },
-    setSessionCompletionCheckConfig({
-      sessionId,
-      completionCheckId,
-      waitForReplyAfterCompletion,
-    }: {
-      sessionId: string;
-      completionCheckId: string | null;
-      waitForReplyAfterCompletion: boolean;
-    }) {
-      return setSessionCompletionCheckConfig(
-        sessionId,
-        completionCheckId,
-        waitForReplyAfterCompletion,
-      );
-    },
-    setSessionArchived({ sessionId, archived }: { sessionId: string; archived: boolean }) {
-      return persistSessionArchived(sessionId, archived);
-    },
-    deleteSession({ sessionId }: { sessionId: string }) {
-      return deleteSession(sessionId);
-    },
-    registerHooks,
-    clearHooks,
-    revealHooksFile,
+    ...getLoopndrollSessionRpcRequestHandlers(),
+    ...getLoopndrollLifecycleRpcRequestHandlers(),
   };
 }
 

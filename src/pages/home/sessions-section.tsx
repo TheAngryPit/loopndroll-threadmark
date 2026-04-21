@@ -197,6 +197,7 @@ function SessionPresetControls({
             <SelectLabel>Continuous</SelectLabel>
             <SelectItem value="infinite">Infinite</SelectItem>
             <SelectItem value="await-reply">Await Reply</SelectItem>
+            <SelectItem value="passive">Passive</SelectItem>
             <SelectItem value="completion-checks">Completion Checks</SelectItem>
           </SelectGroup>
           <SelectSeparator />

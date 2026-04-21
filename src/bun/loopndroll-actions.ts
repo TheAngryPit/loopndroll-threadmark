@@ -5,6 +5,7 @@ import type {
   LoopScope,
   UpdateLoopNotificationInput,
 } from "../shared/app-rpc";
+import { validateTelegramNotificationChatId } from "../shared/telegram-chat-policy";
 import { DEFAULT_PROMPT } from "./constants";
 import { getLoopndrollDatabase } from "./db/client";
 import {
@@ -58,6 +59,12 @@ export async function createLoopNotification(notification: CreateLoopNotificatio
   const paths = getLoopndrollPaths();
   const { db } = getLoopndrollDatabase(paths.databasePath);
   const existingNotifications = readSnapshotFromDatabase().notifications;
+  if (notification.channel === "telegram") {
+    const chatError = validateTelegramNotificationChatId(notification.chatId.trim());
+    if (chatError) {
+      throw new Error(chatError);
+    }
+  }
   const nextNotification = createNotification(notification);
 
   nextNotification.label = getUniqueNotificationLabel(
@@ -97,6 +104,12 @@ export async function createCompletionCheck(input: { label?: string; commands: s
 export async function updateLoopNotification(notification: UpdateLoopNotificationInput) {
   const paths = getLoopndrollPaths();
   const { db } = getLoopndrollDatabase(paths.databasePath);
+  if (notification.channel === "telegram") {
+    const chatError = validateTelegramNotificationChatId(notification.chatId.trim());
+    if (chatError) {
+      throw new Error(chatError);
+    }
+  }
   const existingNotificationRows = db
     .select()
     .from(notifications)

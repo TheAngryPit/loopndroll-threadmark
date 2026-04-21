@@ -1,10 +1,17 @@
 import { integer, primaryKey, sqliteTable, text } from "drizzle-orm/sqlite-core";
-import type { LoopNotification, LoopPreset, LoopScope, LoopSession } from "../../shared/app-rpc";
+import type {
+  LoopNotification,
+  LoopPreset,
+  LoopScope,
+  LoopSession,
+  LoopndrollRuntimeState,
+} from "../../shared/app-rpc";
 
 export const settings = sqliteTable("settings", {
   id: integer("id").primaryKey(),
   defaultPrompt: text("default_prompt").notNull(),
   scope: text("scope").$type<LoopScope>().notNull(),
+  runtimeState: text("runtime_state").$type<LoopndrollRuntimeState>().notNull().default("running"),
   globalPreset: text("global_preset").$type<LoopPreset | null>(),
   globalNotificationId: text("global_notification_id"),
   globalCompletionCheckId: text("global_completion_check_id"),

@@ -4,6 +4,13 @@
   "private": true,
   "type": "module",
   "packageManager": "pnpm@10.33.0",
+  "pnpm": {
+    "overrides": {
+      "basic-ftp": "5.3.0",
+      "hono": "4.12.14",
+      "@hono/node-server": "1.19.13"
+    }
+  },
   "description": "Keep Codex running forever",
   "scripts": {
     "dev": "concurrently -k -n vite,app \"pnpm run hmr\" \"pnpm run dev:app\"",

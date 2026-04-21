@@ -42,10 +42,21 @@ If no mode is active, Codex stops normally.
 
 - **Infinite**: every time Codex stops, Loopndroll sends the default follow-up prompt and keeps the chat going. You can change that default prompt in Settings, or override it for one task by replying to that task in Telegram.
 - **Await Reply**: when Codex stops, Loopndroll waits for your reply in Telegram, then sends that reply back into the same chat.
+- **Passive**: when Codex stops, Loopndroll sends the latest assistant message to Telegram, does not keep Codex on hold, but still lets your next Telegram reply queue the next prompt for that same chat.
 - **Completion Checks**: when Codex stops, Loopndroll runs your commands like tests, lint, or typecheck. If any command fails, it tells Codex to keep going until they pass.
 - **Max Turns 1 / 2 / 3**: Loopndroll keeps Codex going for a fixed number of extra turns, then lets it stop.
 
 This gives you a simple choice: keep pushing automatically, wait for human input, require checks to pass, or allow only a small number of extra turns.
+
+## Hook lifecycle
+
+Loopndroll manages its own Codex hook entries. It does not need to turn off other Codex hooks.
+
+- **Running**: the managed hook is installed and active
+- **Paused**: the managed hook stays installed, but Loopndroll ignores new remote control actions and stop-side effects
+- **Stopped**: Loopndroll removes only its own managed hook entries and stops responding until you start it again
+
+This lets you pause or stop Loopndroll without clearing unrelated hooks from Codex.
 
 ## Use cases
 
@@ -74,10 +85,11 @@ This gives you a simple choice: keep pushing automatically, wait for human input
 ### Get your Telegram chat to show up in the app
 
 1. Open a direct message with your bot and send any message.
-2. Or add the bot to a group and send any message in that group.
-3. Go back to Loopndroll.
-4. The chat should appear in the `Chat` dropdown.
-5. Select it and save the notification.
+2. Go back to Loopndroll.
+3. The chat should appear in the `Chat` dropdown.
+4. Select it and save the notification.
+
+Loopndroll currently supports Telegram **direct messages** for remote control and notifications.
 
 ## Telegram Commands
 
@@ -85,14 +97,16 @@ These commands work in Telegram after your bot is connected:
 
 - `/help` - show the command help
 - `/list` - list chats registered to this Telegram destination
-- `/status` - show the current global mode and per-chat modes
-- `/reply C22 your message` - send a message to one specific chat
+- `/status` - show the current Loopndroll system state, global mode, and per-chat modes
+- `/reply C22 your message` - fallback: send a message to one specific chat without replying directly to the Telegram message
 - `/mode global infinite` - set the global mode to Infinite
 - `/mode global await` - set the global mode to Await Reply
+- `/mode global passive` - set the global mode to Passive
 - `/mode global checks` - set the global mode to Completion Checks
 - `/mode global off` - turn off the global mode
 - `/mode C22 infinite` - set chat `C22` to Infinite
 - `/mode C22 await` - set chat `C22` to Await Reply
+- `/mode C22 passive` - set chat `C22` to Passive
 - `/mode C22 checks` - set chat `C22` to Completion Checks
 - `/mode C22 off` - stop chat `C22`
 
@@ -100,6 +114,7 @@ Notes:
 
 - If you reply directly to a Telegram notification, Loopndroll uses that chat automatically.
 - If you send plain text without a command, Loopndroll sends it to the latest waiting chat in that Telegram conversation.
+- In Passive mode, replying to the Telegram notification queues the next prompt without keeping Codex on hold.
 
 ## Slack Setup
 

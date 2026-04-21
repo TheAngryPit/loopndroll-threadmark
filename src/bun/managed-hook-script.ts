@@ -15,6 +15,21 @@ import {
   type LoopndrollPaths,
   MANAGED_HOOK_SCRIPT_MARKER,
 } from "./loopndroll-core";
+import {
+  buildTelegramPromptReceivedText,
+  buildTelegramWorkingAckText,
+  getTelegramRemotePromptDeliveryMode,
+} from "./telegram-control";
+import { TELEGRAM_OUTPUT_HOOK_SOURCE } from "./telegram-output";
+
+function getLoopndrollRuntimeState(db: {
+  query: (sql: string) => { get: (...args: unknown[]) => Record<string, unknown> | null };
+}) {
+  const row = db.query("select runtime_state from settings where id = 1").get();
+  return row?.runtime_state === "paused" || row?.runtime_state === "stopped"
+    ? row.runtime_state
+    : "running";
+}
 
 export function buildManagedHookScript(paths: LoopndrollPaths) {
   const preamble = `#!/usr/bin/env bun
@@ -41,6 +56,11 @@ const appMigrations = ${JSON.stringify(appMigrations)};
 
   return [
     preamble,
+    `${TELEGRAM_OUTPUT_HOOK_SOURCE}\n`,
+    `${getLoopndrollRuntimeState.toString()}\n\n`,
+    `${getTelegramRemotePromptDeliveryMode.toString()}\n\n`,
+    `${buildTelegramPromptReceivedText.toString()}\n\n`,
+    `${buildTelegramWorkingAckText.toString()}\n\n`,
     MANAGED_HOOK_SCRIPT_CHUNK_1,
     MANAGED_HOOK_SCRIPT_CHUNK_2,
     MANAGED_HOOK_SCRIPT_CHUNK_3,

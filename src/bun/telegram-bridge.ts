@@ -8,6 +8,7 @@ import {
   isPersistentPromptPreset,
   isPromptOnlyArtifact,
   normalizeLoopPreset,
+  normalizeLoopndrollRuntimeState,
   nowIsoString,
   optOutExistingInactiveSessionsFromGlobalPreset,
   resolveSessionPresetState,
@@ -21,12 +22,20 @@ import {
   getTelegramStatusSnapshot,
 } from "./telegram-bridge-text";
 import {
-  collectTelegramChatsFromUpdates,
+  buildTelegramPromptReceivedText,
+  getTelegramRemotePromptDeliveryMode,
+} from "./telegram-control";
+import {
+  createTelegramBridgeUpdateContext,
+  formatTelegramTargetSessionLabel,
+  prepareTelegramBridgeUpdate,
+  type TelegramBridgeUpdateContext,
+} from "./telegram-bridge-context";
+import {
   fetchTelegramUpdates,
   sendTelegramBridgeMessage,
   type TelegramInboundMessage,
   type TelegramUpdate,
-  upsertKnownTelegramChats,
 } from "./telegram-utils";
 
 function getTelegramBridgeBotTokens(db: Database) {
@@ -96,6 +105,7 @@ function listRegisteredTelegramSessions(db: Database, botToken: string, chatId: 
         s.session_id,
         s.session_ref,
         s.title,
+        s.cwd,
         s.transcript_path,
         s.last_assistant_message,
         s.last_seen_at,
@@ -114,6 +124,7 @@ function listRegisteredTelegramSessions(db: Database, botToken: string, chatId: 
     session_id: string;
     session_ref: string;
     title: string | null;
+    cwd: string | null;
     transcript_path: string | null;
     last_assistant_message: string | null;
     last_seen_at: string;
@@ -134,7 +145,7 @@ function listRegisteredTelegramSessions(db: Database, botToken: string, chatId: 
         sessionId: row.session_id,
         sessionRef: row.session_ref,
         source: "stop" as const,
-        cwd: null,
+        cwd: row.cwd,
         notificationIds: [],
         archived: false,
         firstSeenAt: row.last_seen_at,
@@ -182,6 +193,14 @@ function getEffectivePresetForSession(db: Database, sessionId: string) {
 
   return resolveSessionPresetState(row?.session_preset, row?.preset_overridden, row?.global_preset)
     .effectivePreset;
+}
+
+function getLoopndrollRuntimeState(db: Database) {
+  const row = db.query("select runtime_state from settings where id = 1").get() as {
+    runtime_state?: unknown;
+  } | null;
+
+  return normalizeLoopndrollRuntimeState(row?.runtime_state);
 }
 
 function findTelegramReplySessionId(
@@ -233,6 +252,7 @@ function findTelegramSessionByRef(
       `select distinct
         s.session_id,
         s.session_ref,
+        s.cwd,
         s.title
       from sessions s
       inner join session_notifications sn on sn.session_id = s.session_id
@@ -246,6 +266,7 @@ function findTelegramSessionByRef(
     .get(botToken, chatId, sessionRef) as {
     session_id?: string;
     session_ref?: string;
+    cwd?: string | null;
     title?: string | null;
   } | null;
 
@@ -256,6 +277,38 @@ function findTelegramSessionByRef(
   return {
     sessionId: row.session_id,
     sessionRef: row.session_ref,
+    cwd: row.cwd ?? null,
+    title: row.title ?? null,
+  };
+}
+
+function findTelegramSessionById(db: Database, sessionId: string) {
+  const row = db
+    .query(
+      `select
+        session_id,
+        session_ref,
+        cwd,
+        title
+      from sessions
+      where session_id = ?
+      limit 1`,
+    )
+    .get(sessionId) as {
+    session_id?: string;
+    session_ref?: string;
+    cwd?: string | null;
+    title?: string | null;
+  } | null;
+
+  if (!row?.session_id || !row?.session_ref) {
+    return null;
+  }
+
+  return {
+    sessionId: row.session_id,
+    sessionRef: row.session_ref,
+    cwd: row.cwd ?? null,
     title: row.title ?? null,
   };
 }
@@ -294,9 +347,11 @@ function parseModeCommand(text: string) {
         ? "infinite"
         : rawMode === "await"
           ? "await-reply"
-          : rawMode === "checks"
-            ? "completion-checks"
-            : null;
+          : rawMode === "passive"
+            ? "passive"
+            : rawMode === "checks"
+              ? "completion-checks"
+              : null;
   if (rawMode !== "off" && preset === null) {
     return null;
   }
@@ -483,72 +538,6 @@ function upsertSessionRemotePrompt(
   return true;
 }
 
-
-type TelegramBridgeUpdateContext = {
-  paths: LoopndrollPaths;
-  db: Database;
-  botToken: string;
-  update: TelegramUpdate;
-  message: TelegramInboundMessage;
-  trimmedText: string;
-  chatId: string;
-};
-
-function createTelegramBridgeUpdateContext(
-  paths: LoopndrollPaths,
-  db: Database,
-  botToken: string,
-  update: TelegramUpdate,
-): TelegramBridgeUpdateContext | null {
-  const message = update.message;
-  if (!message || typeof message.text !== "string") {
-    return null;
-  }
-
-  const trimmedText = message.text.trim();
-  if (trimmedText.length === 0) {
-    return null;
-  }
-
-  const chatId =
-    typeof message.chat?.id === "number" || typeof message.chat?.id === "string"
-      ? String(message.chat.id)
-      : null;
-  if (!chatId) {
-    return null;
-  }
-
-  return { paths, db, botToken, update, message, trimmedText, chatId };
-}
-
-async function prepareTelegramBridgeUpdate(context: TelegramBridgeUpdateContext) {
-  if (!isAuthorizedTelegramBridgeChat(context.db, context.botToken, context.chatId)) {
-    await appendHookDebugLog(context.paths, {
-      type: "telegram-bridge",
-      action: "ignored-message",
-      reason: "unauthorized-chat",
-      botToken: context.botToken,
-      updateId: context.update.update_id ?? null,
-      chatId: context.chatId,
-    });
-    return false;
-  }
-
-  const discoveredChats = collectTelegramChatsFromUpdates([context.update]);
-  if (discoveredChats.length > 0) {
-    upsertKnownTelegramChats(context.db, context.botToken, discoveredChats);
-  }
-
-  return true;
-}
-
-function formatTelegramSessionLabel(targetSession: {
-  sessionRef: string;
-  title: string | null;
-}) {
-  return `[${targetSession.sessionRef}]${targetSession.title ? ` - ${targetSession.title}` : ""}`;
-}
-
 async function handleListCommand(context: TelegramBridgeUpdateContext) {
   const sessionsForChat = listRegisteredTelegramSessions(
     context.db,
@@ -608,7 +597,11 @@ async function handleHelpCommand(context: TelegramBridgeUpdateContext) {
 async function handleReplyCommand(context: TelegramBridgeUpdateContext) {
   const parsedReply = parseReplyCommand(context.trimmedText);
   if (!parsedReply) {
-    await sendTelegramBridgeMessage(context.botToken, context.chatId, "Usage: /reply C12 your message");
+    await sendTelegramBridgeMessage(
+      context.botToken,
+      context.chatId,
+      "Usage: /reply C12 your message",
+    );
     await appendHookDebugLog(context.paths, {
       type: "telegram-bridge",
       action: "reply-usage",
@@ -647,7 +640,7 @@ async function handleReplyCommand(context: TelegramBridgeUpdateContext) {
     await sendTelegramBridgeMessage(
       context.botToken,
       context.chatId,
-      `[${targetSession.sessionRef}] has no active mode. Use /mode ${targetSession.sessionRef} infinite|await first.`,
+      `[${targetSession.sessionRef}] has no active mode. Use /mode ${targetSession.sessionRef} infinite|await|passive first.`,
     );
     await appendHookDebugLog(context.paths, {
       type: "telegram-bridge",
@@ -665,15 +658,13 @@ async function handleReplyCommand(context: TelegramBridgeUpdateContext) {
     context.db,
     targetSession.sessionId,
     parsedReply.promptText,
-    effectivePreset === "await-reply" ? "once" : "persistent",
+    getTelegramRemotePromptDeliveryMode(effectivePreset),
     context.message,
   );
   await sendTelegramBridgeMessage(
     context.botToken,
     context.chatId,
-    effectivePreset === "await-reply"
-      ? `Queued for ${formatTelegramSessionLabel(targetSession)}.`
-      : `Prompt override set for ${formatTelegramSessionLabel(targetSession)}.`,
+    buildTelegramPromptReceivedText(targetSession),
   );
   await appendHookDebugLog(context.paths, {
     type: "telegram-bridge",
@@ -692,7 +683,7 @@ async function handleModeCommand(context: TelegramBridgeUpdateContext) {
     await sendTelegramBridgeMessage(
       context.botToken,
       context.chatId,
-      "Usage: /mode global infinite|await|off or /mode C22 infinite|await|off",
+      "Usage: /mode global infinite|await|passive|off or /mode C22 infinite|await|passive|off",
     );
     await appendHookDebugLog(context.paths, {
       type: "telegram-bridge",
@@ -749,7 +740,7 @@ async function handleModeCommand(context: TelegramBridgeUpdateContext) {
   await sendTelegramBridgeMessage(
     context.botToken,
     context.chatId,
-    `${formatTelegramSessionLabel(targetSession)} set to ${getModeCommandLabel(parsedMode.preset)}.`,
+    `${formatTelegramTargetSessionLabel(targetSession)} set to ${getModeCommandLabel(parsedMode.preset)}.`,
   );
   await appendHookDebugLog(context.paths, {
     type: "telegram-bridge",
@@ -832,9 +823,17 @@ async function handleFreeformTelegramMessage(context: TelegramBridgeUpdateContex
     context.db,
     sessionId,
     context.trimmedText,
-    effectivePreset === "await-reply" ? "once" : "persistent",
+    getTelegramRemotePromptDeliveryMode(effectivePreset),
     context.message,
   );
+  const targetSession = findTelegramSessionById(context.db, sessionId);
+  if (stored && targetSession) {
+    await sendTelegramBridgeMessage(
+      context.botToken,
+      context.chatId,
+      buildTelegramPromptReceivedText(targetSession),
+    );
+  }
   await appendHookDebugLog(context.paths, {
     type: "telegram-bridge",
     action: stored ? "queue-prompt" : "ignored-message",
@@ -854,11 +853,30 @@ async function processTelegramBridgeUpdate(
   update: TelegramUpdate,
 ) {
   const context = createTelegramBridgeUpdateContext(paths, db, botToken, update);
-  if (!context || !(await prepareTelegramBridgeUpdate(context))) {
+  if (!context || !(await prepareTelegramBridgeUpdate(context, isAuthorizedTelegramBridgeChat))) {
     return;
   }
 
+  const runtimeState = getLoopndrollRuntimeState(db);
   const commandName = getTelegramCommandName(context.trimmedText);
+  if (runtimeState !== "running" && commandName !== "status" && commandName !== "help") {
+    await sendTelegramBridgeMessage(
+      context.botToken,
+      context.chatId,
+      `Loopndroll is ${runtimeState}. Use the app to ${runtimeState === "paused" ? "resume" : "start"} it first.`,
+    );
+    await appendHookDebugLog(context.paths, {
+      type: "telegram-bridge",
+      action: "ignored-message",
+      reason: `runtime-${runtimeState}`,
+      botToken: context.botToken,
+      updateId: context.update.update_id ?? null,
+      chatId: context.chatId,
+      commandName,
+    });
+    return;
+  }
+
   if (commandName && (await handleTelegramBridgeCommand(context, commandName))) {
     return;
   }
@@ -883,6 +901,9 @@ let telegramBridgePolling = false;
 async function pollTelegramReplies() {
   const paths = getLoopndrollPaths();
   const { client } = getLoopndrollDatabase(paths.databasePath);
+  if (getLoopndrollRuntimeState(client) === "stopped") {
+    return;
+  }
   const botTokens = getTelegramBridgeBotTokens(client);
 
   for (const botToken of botTokens) {

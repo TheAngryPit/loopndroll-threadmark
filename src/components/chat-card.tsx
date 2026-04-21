@@ -15,7 +15,7 @@ import type { LoopPreset } from "@/lib/loopndroll";
 export type ChatCardTheme = "orange" | "cyan" | "emerald" | "olive";
 
 export function getChatCardThemeForPreset(preset: LoopPreset | null | undefined): ChatCardTheme {
-  if (preset === "await-reply") {
+  if (preset === "await-reply" || preset === "passive") {
     return "cyan";
   }
 
@@ -156,16 +156,11 @@ export function ChatCard({
             footerClassName,
           )}
         >
-          <div className={cn("min-h-8 min-w-0", themedClasses?.footerText)}>
-            {footerStart}
-          </div>
+          <div className={cn("min-h-8 min-w-0", themedClasses?.footerText)}>{footerStart}</div>
           <Button
             aria-pressed={isRunning}
             onClick={onAction}
-            className={cn(
-              "w-20 gap-1.5",
-              themedClasses?.button,
-            )}
+            className={cn("w-20 gap-1.5", themedClasses?.button)}
             size="sm"
             type="button"
             variant="outline"
@@ -189,6 +184,10 @@ export function InfiniteCardIcon() {
 
 export function AwaitReplyCardIcon() {
   return <ChatCircleDots aria-hidden="true" size={28} weight="regular" />;
+}
+
+export function PassiveCardIcon() {
+  return <ChatCircleDots aria-hidden="true" size={28} weight="duotone" />;
 }
 
 export function CompletionChecksCardIcon() {

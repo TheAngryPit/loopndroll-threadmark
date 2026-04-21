@@ -5,6 +5,7 @@ import {
   ChatCard,
   CompletionChecksCardIcon,
   InfiniteCardIcon,
+  PassiveCardIcon,
   TurnCountMarker,
   type ChatCardTheme,
 } from "@/components/chat-card";
@@ -46,6 +47,12 @@ const globalPresets: Array<{
     theme: "cyan",
   },
   {
+    preset: "passive",
+    title: "Passive",
+    marker: <PassiveCardIcon />,
+    theme: "cyan",
+  },
+  {
     preset: "completion-checks",
     title: "Completion Checks",
     marker: <CompletionChecksCardIcon />,
@@ -75,6 +82,7 @@ const globalPresets: Array<{
 const sessionPresets: Array<{ preset: LoopPreset; label: string }> = [
   { preset: "infinite", label: "Infinite" },
   { preset: "await-reply", label: "Await Reply" },
+  { preset: "passive", label: "Passive" },
   { preset: "completion-checks", label: "Completion Checks" },
   { preset: "max-turns-1", label: "Max Turns 1" },
   { preset: "max-turns-2", label: "Max Turns 2" },

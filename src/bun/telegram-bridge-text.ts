@@ -1,6 +1,11 @@
 import { type Database } from "bun:sqlite";
-import type { LoopPreset, LoopScope, LoopSession } from "../shared/app-rpc";
-import { normalizeLoopPreset, normalizeScope } from "./loopndroll-core";
+import type { LoopPreset, LoopScope, LoopSession, LoopndrollRuntimeState } from "../shared/app-rpc";
+import {
+  normalizeLoopPreset,
+  normalizeLoopndrollRuntimeState,
+  normalizeScope,
+} from "./loopndroll-core";
+import { formatTelegramSessionLabel } from "./telegram-output";
 
 export function buildTelegramSessionListText(sessionsForChat: LoopSession[]) {
   if (sessionsForChat.length === 0) {
@@ -12,7 +17,11 @@ export function buildTelegramSessionListText(sessionsForChat: LoopSession[]) {
       typeof session.title === "string" && session.title.trim().length > 0
         ? session.title.trim()
         : "Untitled chat";
-    return `[${session.sessionRef}] - ${title}`;
+    return formatTelegramSessionLabel({
+      cwd: session.cwd,
+      sessionRef: session.sessionRef,
+      title,
+    });
   });
 
   const suffix =
@@ -29,6 +38,9 @@ function getLoopPresetLabel(preset: LoopPreset | null) {
   }
   if (preset === "await-reply") {
     return "Await Reply";
+  }
+  if (preset === "passive") {
+    return "Passive";
   }
   if (preset === "completion-checks") {
     return "Completion checks";
@@ -47,15 +59,19 @@ function getLoopPresetLabel(preset: LoopPreset | null) {
 
 export function getTelegramStatusSnapshot(db: Database) {
   const row = db
-    .query("select scope, global_preset, hooks_auto_registration from settings where id = 1")
+    .query(
+      "select scope, runtime_state, global_preset, hooks_auto_registration from settings where id = 1",
+    )
     .get() as {
     scope?: unknown;
+    runtime_state?: unknown;
     global_preset?: unknown;
     hooks_auto_registration?: number | boolean;
   } | null;
 
   return {
     scope: normalizeScope(row?.scope),
+    runtimeState: normalizeLoopndrollRuntimeState(row?.runtime_state),
     globalPreset: normalizeLoopPreset(row?.global_preset),
     hooksAutoRegistration:
       typeof row?.hooks_auto_registration === "boolean"
@@ -67,6 +83,7 @@ export function getTelegramStatusSnapshot(db: Database) {
 export function buildTelegramStatusText(
   settingsSnapshot: {
     scope: LoopScope;
+    runtimeState: LoopndrollRuntimeState;
     globalPreset: LoopPreset | null;
     hooksAutoRegistration: boolean;
   },
@@ -75,8 +92,16 @@ export function buildTelegramStatusText(
   const visibleSessions = sessionsForChat.filter((session) => !session.archived);
   const lines = [
     "Current status:",
+    `System: ${settingsSnapshot.runtimeState}`,
+    `Hooks auto-registration: ${settingsSnapshot.hooksAutoRegistration ? "On" : "Off"}`,
     `Global preset: ${getLoopPresetLabel(settingsSnapshot.globalPreset)}`,
   ];
+
+  if (settingsSnapshot.runtimeState === "paused") {
+    lines.push("Remote control is paused. Resume from the app before sending new prompts.");
+  } else if (settingsSnapshot.runtimeState === "stopped") {
+    lines.push("Loopndroll is stopped. Start it from the app before sending new prompts.");
+  }
 
   if (visibleSessions.length === 0) {
     lines.push("", "Registered chats: none");
@@ -95,7 +120,13 @@ export function buildTelegramStatusText(
         : session.presetSource === "off"
           ? "Off"
           : "Inherit global";
-    lines.push(`[${session.sessionRef}] - ${title}: ${presetLabel}`);
+    lines.push(
+      `${formatTelegramSessionLabel({
+        cwd: session.cwd,
+        sessionRef: session.sessionRef,
+        title,
+      })}: ${presetLabel}`,
+    );
   }
 
   if (visibleSessions.length > 20) {
@@ -109,25 +140,35 @@ export function buildTelegramHelpText() {
   return [
     "Available commands:",
     "/list - List chats registered to this Telegram destination",
-    "/status - Show current global mode and per-chat presets",
-    "/reply C22 your message - Send a prompt to a specific chat",
+    "/status - Show the system state, global preset, and per-chat presets",
+    "/reply C22 your message - Fallback: send a prompt to a specific chat",
     "/mode global infinite - Set the global preset to Infinite",
     "/mode global await - Set the global preset to Await Reply",
+    "/mode global passive - Set the global preset to Passive",
     "/mode global checks - Set the global preset to Completion checks",
     "/mode global off - Disable the global preset",
     "/mode C22 infinite - Set chat C22 to Infinite",
     "/mode C22 await - Set chat C22 to Await Reply",
+    "/mode C22 passive - Set chat C22 to Passive",
     "/mode C22 off - Stop chat C22",
     "",
     "Reply behavior:",
     "Reply directly to a Telegram notification to target that chat.",
-    "Or send plain text without a command to target the latest waiting chat in this Telegram conversation.",
+    "Use /reply only as a fallback when you do not want to reply to the Telegram message directly.",
+    "Plain text without a command targets the latest waiting chat in this Telegram conversation.",
+    "",
+    "Modes:",
+    "Await Reply: sends a notification and keeps Codex waiting for your reply.",
+    "Passive: sends a notification, does not keep Codex waiting, but the next Telegram reply still queues the next prompt.",
+    "Infinite: keeps sending a persistent prompt until you change the mode.",
+    "Off: disables the preset for that chat or global default.",
     "",
     "Examples:",
     "/list",
     "/status",
     "/reply C22 fix the failing test",
     "/mode global await",
+    "/mode C22 passive",
     "/mode C22 off",
   ].join("\n");
 }
@@ -138,6 +179,9 @@ export function getModeCommandLabel(preset: LoopPreset | null) {
   }
   if (preset === "await-reply") {
     return "Await Reply";
+  }
+  if (preset === "passive") {
+    return "Passive";
   }
   if (preset === "completion-checks") {
     return "Completion checks";

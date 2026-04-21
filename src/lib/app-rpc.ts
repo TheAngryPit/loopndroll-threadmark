@@ -86,6 +86,18 @@ type AppRpc = {
     clearHooks: AppRpcSchema["bun"]["requests"]["clearHooks"]["params"] extends undefined
       ? () => Promise<AppRpcSchema["bun"]["requests"]["clearHooks"]["response"]>
       : never;
+    pauseLoopndroll: AppRpcSchema["bun"]["requests"]["pauseLoopndroll"]["params"] extends undefined
+      ? () => Promise<AppRpcSchema["bun"]["requests"]["pauseLoopndroll"]["response"]>
+      : never;
+    resumeLoopndroll: AppRpcSchema["bun"]["requests"]["resumeLoopndroll"]["params"] extends undefined
+      ? () => Promise<AppRpcSchema["bun"]["requests"]["resumeLoopndroll"]["response"]>
+      : never;
+    startLoopndroll: AppRpcSchema["bun"]["requests"]["startLoopndroll"]["params"] extends undefined
+      ? () => Promise<AppRpcSchema["bun"]["requests"]["startLoopndroll"]["response"]>
+      : never;
+    stopLoopndroll: AppRpcSchema["bun"]["requests"]["stopLoopndroll"]["params"] extends undefined
+      ? () => Promise<AppRpcSchema["bun"]["requests"]["stopLoopndroll"]["response"]>
+      : never;
     revealHooksFile: AppRpcSchema["bun"]["requests"]["revealHooksFile"]["params"] extends undefined
       ? () => Promise<AppRpcSchema["bun"]["requests"]["revealHooksFile"]["response"]>
       : never;

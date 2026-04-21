@@ -4,8 +4,12 @@ export {
   clearHooks,
   ensureLoopndrollSetup,
   getLoopndrollSnapshot,
+  pauseLoopndroll,
   registerHooks,
   revealHooksFile,
+  resumeLoopndroll,
+  startLoopndroll,
+  stopLoopndroll,
 } from "./hook-management";
 export {
   createCompletionCheck,

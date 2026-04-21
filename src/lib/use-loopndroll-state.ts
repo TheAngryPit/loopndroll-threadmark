@@ -15,7 +15,9 @@ import {
   deleteSession,
   ensureLoopndrollSetup,
   getLoopndrollState,
+  pauseLoopndroll,
   registerHooks,
+  resumeLoopndroll,
   saveDefaultPrompt,
   setGlobalCompletionCheckConfig,
   setGlobalNotification,
@@ -25,6 +27,8 @@ import {
   setLoopScope,
   setSessionCompletionCheckConfig,
   setSessionPreset,
+  startLoopndroll,
+  stopLoopndroll,
   updateCompletionCheck,
   updateNotification,
 } from "./loopndroll";
@@ -62,6 +66,10 @@ type UseLoopndrollStateResult = {
   removeSession: (sessionId: string) => Promise<void>;
   installHooks: () => Promise<void>;
   uninstallHooks: () => Promise<void>;
+  pauseLoopndroll: () => Promise<void>;
+  resumeLoopndroll: () => Promise<void>;
+  startLoopndroll: () => Promise<void>;
+  stopLoopndroll: () => Promise<void>;
   refresh: () => Promise<void>;
 };
 
@@ -209,6 +217,18 @@ function createLoopndrollActions(
     },
     uninstallHooks() {
       return runMutation(() => clearHooks());
+    },
+    pauseLoopndroll() {
+      return runMutation(() => pauseLoopndroll());
+    },
+    resumeLoopndroll() {
+      return runMutation(() => resumeLoopndroll());
+    },
+    startLoopndroll() {
+      return runMutation(() => startLoopndroll());
+    },
+    stopLoopndroll() {
+      return runMutation(() => stopLoopndroll());
     },
     refresh() {
       return runMutation(() => getLoopndrollState());

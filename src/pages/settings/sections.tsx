@@ -15,13 +15,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import {
-  Field,
-  FieldContent,
-  FieldError,
-  FieldGroup,
-  FieldLabel,
-} from "@/components/ui/field";
+import { Field, FieldContent, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Table, TableBody, TableCell, TableRow } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
 import type { CompletionCheck, LoopNotification } from "@/lib/loopndroll";
@@ -34,7 +28,9 @@ import {
 
 export function DefaultPromptSection(props: {
   defaultPromptError: string | undefined;
-  form: { register: ReturnType<typeof import("react-hook-form").useForm<SettingsFormValues>>["register"] };
+  form: {
+    register: ReturnType<typeof import("react-hook-form").useForm<SettingsFormValues>>["register"];
+  };
   onSubmit: () => void;
 }) {
   return (
@@ -57,7 +53,9 @@ export function DefaultPromptSection(props: {
           >
             <Field data-invalid={Boolean(props.defaultPromptError)}>
               <FieldContent>
-                <FieldLabel className="sr-only" htmlFor="default-prompt">Prompt</FieldLabel>
+                <FieldLabel className="sr-only" htmlFor="default-prompt">
+                  Prompt
+                </FieldLabel>
                 <Textarea
                   aria-invalid={Boolean(props.defaultPromptError)}
                   className="min-h-28 max-w-[496px] bg-input px-3 py-2.5 tracking-tight focus-visible:bg-background"
@@ -65,14 +63,18 @@ export function DefaultPromptSection(props: {
                   rows={4}
                   {...props.form.register("defaultPrompt")}
                 />
-                {props.defaultPromptError ? <FieldError>{props.defaultPromptError}</FieldError> : null}
+                {props.defaultPromptError ? (
+                  <FieldError>{props.defaultPromptError}</FieldError>
+                ) : null}
               </FieldContent>
             </Field>
           </form>
         </FieldGroup>
       </CardContent>
       <CardFooter className={`${settingsSectionFooterClassName} justify-end`}>
-        <Button form="default-prompt-form" size="sm" type="submit">Save</Button>
+        <Button form="default-prompt-form" size="sm" type="submit">
+          Save
+        </Button>
       </CardFooter>
     </Card>
   );
@@ -126,7 +128,9 @@ export function NotificationsSection(props: {
                       </DropdownMenuTrigger>
                       <DropdownMenuContent align="end">
                         <DropdownMenuGroup>
-                          <DropdownMenuItem onClick={() => props.onEdit(notification)}>Edit</DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => props.onEdit(notification)}>
+                            Edit
+                          </DropdownMenuItem>
                           <DropdownMenuItem
                             onClick={() => props.onRemove(notification.id)}
                             variant="destructive"
@@ -179,7 +183,8 @@ export function CompletionChecksSection(props: {
       <CardHeader>
         <CardTitle className="font-semibold">Completion Checks</CardTitle>
         <CardDescription className="leading-normal">
-          Register reusable command groups that Completion checks mode can run before a chat is allowed to finish.
+          Register reusable command groups that Completion checks mode can run before a chat is
+          allowed to finish.
         </CardDescription>
       </CardHeader>
       <CardContent>
@@ -197,7 +202,8 @@ export function CompletionChecksSection(props: {
                     <div className="space-y-0.5">
                       <p className="font-medium">{completionCheck.label}</p>
                       <p className="text-sm text-muted-foreground">
-                        {completionCheck.commands.length} {completionCheck.commands.length === 1 ? "command" : "commands"}
+                        {completionCheck.commands.length}{" "}
+                        {completionCheck.commands.length === 1 ? "command" : "commands"}
                       </p>
                     </div>
                   </TableCell>
@@ -211,7 +217,9 @@ export function CompletionChecksSection(props: {
                       </DropdownMenuTrigger>
                       <DropdownMenuContent align="end">
                         <DropdownMenuGroup>
-                          <DropdownMenuItem onClick={() => props.onEdit(completionCheck)}>Edit</DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => props.onEdit(completionCheck)}>
+                            Edit
+                          </DropdownMenuItem>
                           <DropdownMenuItem
                             onClick={() => props.onRemove(completionCheck.id)}
                             variant="destructive"
@@ -255,45 +263,109 @@ export function CompletionChecksSection(props: {
 export function HookRegistrationSection(props: {
   hasResolvedHookState: boolean;
   hooksDetected: boolean;
+  runtimeState: "running" | "paused" | "stopped";
   onClearHooks: () => void;
+  onPauseLoopndroll: () => void;
   onRegisterHooks: () => void;
   onRevealHooksFile: () => void;
+  onResumeLoopndroll: () => void;
+  onStartLoopndroll: () => void;
+  onStopLoopndroll: () => void;
 }) {
+  const runtimeStateLabel =
+    props.runtimeState === "paused"
+      ? "Paused"
+      : props.runtimeState === "stopped"
+        ? "Stopped"
+        : "Running";
+
   return (
     <Card className={settingsSectionCardClassName}>
       <CardHeader>
         <CardTitle className="font-semibold">Hook Registration</CardTitle>
         <CardDescription className="leading-normal">
-          Register hooks when they are missing, or clear the current registration state.
+          Control the managed Loopndroll hook without touching other Codex hooks. Pause keeps the
+          hook installed but inert. Stop removes only the Loopndroll-managed hook.
         </CardDescription>
       </CardHeader>
       <CardContent />
       <CardFooter className={`${settingsSectionFooterClassName} gap-2`}>
         <div className="flex items-center gap-1 text-sm text-muted-foreground">
+          <span>State: {runtimeStateLabel}</span>
+          <span aria-hidden="true">•</span>
           <span>Open</span>
-          <button className="text-blue-400 transition-colors hover:text-blue-300" onClick={props.onRevealHooksFile} type="button">
+          <button
+            className="text-blue-400 transition-colors hover:text-blue-300"
+            onClick={props.onRevealHooksFile}
+            type="button"
+          >
             hooks.json
           </button>
         </div>
         <div className="flex min-h-8 min-w-[220px] items-center justify-end gap-2">
-          {props.hasResolvedHookState ? (
-            <>
-              <Button
-                disabled={!props.hooksDetected}
-                onClick={props.onClearHooks}
-                size="sm"
-                type="button"
-                variant="outline"
-              >
-                Clear hooks
-              </Button>
-              {!props.hooksDetected ? (
-                <Button onClick={props.onRegisterHooks} size="sm" type="button">Register</Button>
-              ) : null}
-            </>
-          ) : null}
+          <HookRegistrationActions {...props} />
         </div>
       </CardFooter>
     </Card>
+  );
+}
+
+function HookRegistrationActions(props: {
+  hasResolvedHookState: boolean;
+  hooksDetected: boolean;
+  runtimeState: "running" | "paused" | "stopped";
+  onClearHooks: () => void;
+  onPauseLoopndroll: () => void;
+  onRegisterHooks: () => void;
+  onResumeLoopndroll: () => void;
+  onStartLoopndroll: () => void;
+  onStopLoopndroll: () => void;
+}) {
+  if (!props.hasResolvedHookState) {
+    return null;
+  }
+
+  return (
+    <>
+      {props.runtimeState === "running" ? (
+        <>
+          <Button onClick={props.onPauseLoopndroll} size="sm" type="button" variant="outline">
+            Pause
+          </Button>
+          <Button onClick={props.onStopLoopndroll} size="sm" type="button" variant="outline">
+            Stop
+          </Button>
+        </>
+      ) : null}
+      {props.runtimeState === "paused" ? (
+        <>
+          <Button onClick={props.onResumeLoopndroll} size="sm" type="button">
+            Resume
+          </Button>
+          <Button onClick={props.onStopLoopndroll} size="sm" type="button" variant="outline">
+            Stop
+          </Button>
+        </>
+      ) : null}
+      {props.runtimeState === "stopped" ? (
+        <Button onClick={props.onStartLoopndroll} size="sm" type="button">
+          Start
+        </Button>
+      ) : null}
+      <Button
+        disabled={!props.hooksDetected}
+        onClick={props.onClearHooks}
+        size="sm"
+        type="button"
+        variant="outline"
+      >
+        Clear managed hook
+      </Button>
+      {!props.hooksDetected && props.runtimeState !== "stopped" ? (
+        <Button onClick={props.onRegisterHooks} size="sm" type="button">
+          Register
+        </Button>
+      ) : null}
+    </>
   );
 }

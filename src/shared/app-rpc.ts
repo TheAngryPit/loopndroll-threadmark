@@ -25,10 +25,12 @@ export type AppUpdateState = {
 };
 
 export type LoopScope = "global" | "per-task";
+export type LoopndrollRuntimeState = "running" | "paused" | "stopped";
 
 export type LoopPreset =
   | "infinite"
   | "await-reply"
+  | "passive"
   | "completion-checks"
   | "max-turns-1"
   | "max-turns-2"
@@ -117,6 +119,7 @@ export type LoopSession = {
 export type LoopndrollSnapshot = {
   defaultPrompt: string;
   scope: LoopScope;
+  runtimeState: LoopndrollRuntimeState;
   globalPreset: LoopPreset | null;
   globalNotificationId: string | null;
   globalCompletionCheckId: string | null;
@@ -295,6 +298,22 @@ export type AppRpcSchema = {
         response: LoopndrollSnapshot;
       };
       clearHooks: {
+        params: undefined;
+        response: LoopndrollSnapshot;
+      };
+      pauseLoopndroll: {
+        params: undefined;
+        response: LoopndrollSnapshot;
+      };
+      resumeLoopndroll: {
+        params: undefined;
+        response: LoopndrollSnapshot;
+      };
+      startLoopndroll: {
+        params: undefined;
+        response: LoopndrollSnapshot;
+      };
+      stopLoopndroll: {
         params: undefined;
         response: LoopndrollSnapshot;
       };

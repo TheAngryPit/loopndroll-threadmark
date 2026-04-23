@@ -21,6 +21,7 @@ import {
   normalizeLoopndrollRuntimeState,
   readSnapshotFromDatabase,
 } from "./loopndroll-core";
+import { refreshCanonicalThreadNames } from "./thread-name-refresh";
 
 async function loadHooksDocument(paths: LoopndrollPaths) {
   try {
@@ -264,20 +265,27 @@ function setRuntimeState(value: "running" | "paused" | "stopped") {
   db.update(settings).set({ runtimeState: value }).where(eq(settings.id, 1)).run();
 }
 
+export function buildLoopndrollSetupSnapshot(
+  baseSnapshot: Omit<LoopndrollSnapshot, "health">,
+  health: LoopndrollSnapshot["health"],
+): LoopndrollSnapshot {
+  return {
+    ...baseSnapshot,
+    health,
+  };
+}
+
 export async function loadSnapshot(paths: LoopndrollPaths) {
   getLoopndrollDatabase(paths.databasePath);
   const baseSnapshot = readSnapshotFromDatabase();
   const health = await computeHealth(paths);
 
-  return {
-    ...baseSnapshot,
-    health,
-  } satisfies LoopndrollSnapshot;
+  return buildLoopndrollSetupSnapshot(baseSnapshot, health);
 }
 
 export async function ensureLoopndrollSetup() {
   const paths = getLoopndrollPaths();
-  getLoopndrollDatabase(paths.databasePath);
+  const { client } = getLoopndrollDatabase(paths.databasePath);
 
   const settingsRow = getSettingsRow();
   if (
@@ -285,6 +293,24 @@ export async function ensureLoopndrollSetup() {
     normalizeLoopndrollRuntimeState(settingsRow.runtimeState) !== "stopped"
   ) {
     await ensureRegistered(paths);
+  }
+
+  try {
+    const refreshedCount = await refreshCanonicalThreadNames(client);
+    if (refreshedCount > 0) {
+      await appendHookDebugLog(paths, {
+        type: "setup",
+        action: "refresh-canonical-thread-names",
+        refreshedCount,
+      });
+    }
+  } catch (error) {
+    await appendHookDebugLog(paths, {
+      type: "setup",
+      action: "refresh-canonical-thread-names",
+      status: "failed",
+      error: error instanceof Error ? error.message : String(error),
+    });
   }
 
   return loadSnapshot(paths);

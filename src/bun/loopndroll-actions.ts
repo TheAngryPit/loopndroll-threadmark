@@ -251,14 +251,14 @@ export async function setSessionNotifications(sessionId: string, notificationIds
     const existingSession = tx
       .select()
       .from(sessions)
-      .where(eq(sessions.sessionId, sessionId))
+      .where(eq(sessions.threadId, sessionId))
       .get();
     if (!existingSession) {
       tx.insert(sessions).values(buildNewSession(sessionId, nextSessionRef)).run();
       applyGlobalNotificationToSession(tx, sessionId, getStoredGlobalNotificationId(tx));
     }
 
-    tx.delete(sessionNotifications).where(eq(sessionNotifications.sessionId, sessionId)).run();
+    tx.delete(sessionNotifications).where(eq(sessionNotifications.threadId, sessionId)).run();
 
     if (existingSession?.archived) {
       return;
@@ -268,7 +268,7 @@ export async function setSessionNotifications(sessionId: string, notificationIds
       tx.insert(sessionNotifications)
         .values(
           dedupedNotificationIds.map((notificationId) => ({
-            sessionId,
+            threadId: sessionId,
             notificationId,
           })),
         )
@@ -313,8 +313,8 @@ export async function setGlobalPreset(preset: LoopPreset | null) {
     if (preset !== "await-reply") {
       tx.run(
         `delete from session_awaiting_replies
-         where session_id in (
-           select session_id
+         where thread_id in (
+           select thread_id
            from sessions
            where preset is null
              and preset_overridden = 0
@@ -325,8 +325,8 @@ export async function setGlobalPreset(preset: LoopPreset | null) {
     if (preset === null) {
       tx.run(
         `delete from session_remote_prompts
-         where session_id in (
-           select session_id
+         where thread_id in (
+           select thread_id
            from sessions
            where preset is null
              and preset_overridden = 0
@@ -339,8 +339,8 @@ export async function setGlobalPreset(preset: LoopPreset | null) {
       tx.run(
         `delete from session_remote_prompts
          where delivery_mode = 'persistent'
-           and session_id in (
-             select session_id
+           and thread_id in (
+             select thread_id
              from sessions
              where preset is null
                and preset_overridden = 0
@@ -421,7 +421,7 @@ export async function setSessionCompletionCheckConfig(
     const existingSession = tx
       .select()
       .from(sessions)
-      .where(eq(sessions.sessionId, sessionId))
+      .where(eq(sessions.threadId, sessionId))
       .get();
 
     if (!existingSession) {
@@ -435,14 +435,14 @@ export async function setSessionCompletionCheckConfig(
         completionCheckWaitForReply:
           nextCompletionCheckId === null ? false : waitForReplyAfterCompletion,
       })
-      .where(eq(sessions.sessionId, sessionId))
+      .where(eq(sessions.threadId, sessionId))
       .run();
 
     if (nextCompletionCheckId !== null) {
       return;
     }
 
-    tx.delete(sessionAwaitingReplies).where(eq(sessionAwaitingReplies.sessionId, sessionId)).run();
+    tx.delete(sessionAwaitingReplies).where(eq(sessionAwaitingReplies.threadId, sessionId)).run();
   });
 
   return loadSnapshot(paths);
@@ -457,7 +457,7 @@ export async function setSessionPreset(sessionId: string, preset: LoopPreset | n
     const existingSession = tx
       .select()
       .from(sessions)
-      .where(eq(sessions.sessionId, sessionId))
+      .where(eq(sessions.threadId, sessionId))
       .get();
 
     if (!existingSession) {
@@ -474,13 +474,11 @@ export async function setSessionPreset(sessionId: string, preset: LoopPreset | n
           completionCheckId: null,
           completionCheckWaitForReply: false,
         })
-        .where(eq(sessions.sessionId, sessionId))
+        .where(eq(sessions.threadId, sessionId))
         .run();
-      tx.delete(sessionRuntime).where(eq(sessionRuntime.sessionId, sessionId)).run();
-      tx.delete(sessionAwaitingReplies)
-        .where(eq(sessionAwaitingReplies.sessionId, sessionId))
-        .run();
-      tx.delete(sessionRemotePrompts).where(eq(sessionRemotePrompts.sessionId, sessionId)).run();
+      tx.delete(sessionRuntime).where(eq(sessionRuntime.threadId, sessionId)).run();
+      tx.delete(sessionAwaitingReplies).where(eq(sessionAwaitingReplies.threadId, sessionId)).run();
+      tx.delete(sessionRemotePrompts).where(eq(sessionRemotePrompts.threadId, sessionId)).run();
       return;
     }
 
@@ -503,27 +501,25 @@ export async function setSessionPreset(sessionId: string, preset: LoopPreset | n
         presetOverridden: true,
         activeSince: nextActiveSince,
       })
-      .where(eq(sessions.sessionId, sessionId))
+      .where(eq(sessions.threadId, sessionId))
       .run();
-    tx.delete(sessionRuntime).where(eq(sessionRuntime.sessionId, sessionId)).run();
+    tx.delete(sessionRuntime).where(eq(sessionRuntime.threadId, sessionId)).run();
     if (preset !== "await-reply") {
-      tx.delete(sessionAwaitingReplies)
-        .where(eq(sessionAwaitingReplies.sessionId, sessionId))
-        .run();
+      tx.delete(sessionAwaitingReplies).where(eq(sessionAwaitingReplies.threadId, sessionId)).run();
     }
     if (isRestartingFromOff) {
-      tx.delete(sessionRemotePrompts).where(eq(sessionRemotePrompts.sessionId, sessionId)).run();
+      tx.delete(sessionRemotePrompts).where(eq(sessionRemotePrompts.threadId, sessionId)).run();
       return;
     }
     if (preset === null) {
-      tx.delete(sessionRemotePrompts).where(eq(sessionRemotePrompts.sessionId, sessionId)).run();
+      tx.delete(sessionRemotePrompts).where(eq(sessionRemotePrompts.threadId, sessionId)).run();
       return;
     }
     if (!isPersistentPromptPreset(preset)) {
       tx.delete(sessionRemotePrompts)
         .where(
           and(
-            eq(sessionRemotePrompts.sessionId, sessionId),
+            eq(sessionRemotePrompts.threadId, sessionId),
             eq(sessionRemotePrompts.deliveryMode, "persistent"),
           ),
         )
@@ -542,7 +538,7 @@ export async function setSessionArchived(sessionId: string, archived: boolean) {
     const existingSession = tx
       .select()
       .from(sessions)
-      .where(eq(sessions.sessionId, sessionId))
+      .where(eq(sessions.threadId, sessionId))
       .get();
 
     if (!existingSession) {
@@ -558,17 +554,17 @@ export async function setSessionArchived(sessionId: string, archived: boolean) {
         completionCheckId: archived ? null : existingSession.completionCheckId,
         completionCheckWaitForReply: archived ? false : existingSession.completionCheckWaitForReply,
       })
-      .where(eq(sessions.sessionId, sessionId))
+      .where(eq(sessions.threadId, sessionId))
       .run();
 
     if (!archived) {
       return;
     }
 
-    tx.delete(sessionNotifications).where(eq(sessionNotifications.sessionId, sessionId)).run();
-    tx.delete(sessionRuntime).where(eq(sessionRuntime.sessionId, sessionId)).run();
-    tx.delete(sessionAwaitingReplies).where(eq(sessionAwaitingReplies.sessionId, sessionId)).run();
-    tx.delete(sessionRemotePrompts).where(eq(sessionRemotePrompts.sessionId, sessionId)).run();
+    tx.delete(sessionNotifications).where(eq(sessionNotifications.threadId, sessionId)).run();
+    tx.delete(sessionRuntime).where(eq(sessionRuntime.threadId, sessionId)).run();
+    tx.delete(sessionAwaitingReplies).where(eq(sessionAwaitingReplies.threadId, sessionId)).run();
+    tx.delete(sessionRemotePrompts).where(eq(sessionRemotePrompts.threadId, sessionId)).run();
   });
 
   return loadSnapshot(paths);
@@ -578,7 +574,7 @@ export async function deleteSession(sessionId: string) {
   const paths = getLoopndrollPaths();
   const { db } = getLoopndrollDatabase(paths.databasePath);
 
-  db.delete(sessions).where(eq(sessions.sessionId, sessionId)).run();
+  db.delete(sessions).where(eq(sessions.threadId, sessionId)).run();
 
   return loadSnapshot(paths);
 }

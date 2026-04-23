@@ -7,6 +7,7 @@ import {
   LOOP_SESSION_SOURCE_VALUES,
   NOTIFICATION_CHANNEL_VALUES,
 } from "../constants";
+import { nowIsoString, shouldIgnoreMigrationStatementError } from "./migration-runtime";
 
 export type AppMigration = {
   id: number;
@@ -917,30 +918,20 @@ export const appMigrations: AppMigration[] = [
       `update settings set runtime_state = 'running' where runtime_state is null or trim(runtime_state) = ''`,
     ],
   },
+  {
+    id: 18,
+    name: "canonical_thread_fields",
+    statements: [
+      `alter table sessions rename column session_id to thread_id`,
+      `alter table sessions rename column title to thread_name`,
+      `alter table session_notifications rename column session_id to thread_id`,
+      `alter table session_runtime rename column session_id to thread_id`,
+      `alter table session_remote_prompts rename column session_id to thread_id`,
+      `alter table telegram_delivery_receipts rename column session_id to thread_id`,
+      `alter table session_awaiting_replies rename column session_id to thread_id`,
+    ],
+  },
 ];
-
-function nowIsoString() {
-  return new Date().toISOString();
-}
-
-function shouldIgnoreMigrationStatementError(sqlite: Database, statement: string, error: unknown) {
-  const message = error instanceof Error ? error.message : String(error);
-  if (!message.toLowerCase().includes("duplicate column name:")) {
-    return false;
-  }
-
-  const match = /^\s*alter\s+table\s+(\w+)\s+add\s+column\s+(\w+)/i.exec(statement);
-  if (!match) {
-    return false;
-  }
-
-  const [, tableName, columnName] = match;
-  const rows = sqlite.query(`pragma table_info(${tableName})`).all() as Array<{
-    name?: string;
-  }>;
-
-  return rows.some((row) => row.name === columnName);
-}
 
 export function applyAppMigrations(
   sqlite: Database,

@@ -187,8 +187,8 @@ function stripMarkdownTitle(value: string) {
 }
 
 function getSessionNumber(session: LoopSession, fallbackNumber: number) {
-  const codexNumber = /^\d+$/.test(session.sessionId)
-    ? Number.parseInt(session.sessionId, 10)
+  const codexNumber = /^\d+$/.test(session.threadId)
+    ? Number.parseInt(session.threadId, 10)
     : undefined;
   return typeof codexNumber === "number" && Number.isSafeInteger(codexNumber) && codexNumber > 0
     ? codexNumber
@@ -200,11 +200,11 @@ export function getSessionRef(session: LoopSession, fallbackNumber: number) {
 }
 
 export function getSessionPrompt(session: LoopSession) {
-  if (!session.title) {
+  if (!session.threadName) {
     return null;
   }
 
-  const prompt = stripMarkdownTitle(session.title);
+  const prompt = stripMarkdownTitle(session.threadName);
   return prompt || null;
 }
 

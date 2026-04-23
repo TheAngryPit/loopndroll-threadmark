@@ -13,14 +13,14 @@ export function buildTelegramSessionListText(sessionsForChat: LoopSession[]) {
   }
 
   const lines = sessionsForChat.slice(0, 20).map((session) => {
-    const title =
-      typeof session.title === "string" && session.title.trim().length > 0
-        ? session.title.trim()
-        : "Untitled chat";
+    const threadName =
+      typeof session.threadName === "string" && session.threadName.trim().length > 0
+        ? session.threadName.trim()
+        : null;
     return formatTelegramSessionLabel({
       cwd: session.cwd,
       sessionRef: session.sessionRef,
-      title,
+      title: threadName,
     });
   });
 
@@ -110,10 +110,10 @@ export function buildTelegramStatusText(
 
   lines.push("", "Per-chat presets:");
   for (const session of visibleSessions.slice(0, 20)) {
-    const title =
-      typeof session.title === "string" && session.title.trim().length > 0
-        ? session.title.trim()
-        : "Untitled chat";
+    const threadName =
+      typeof session.threadName === "string" && session.threadName.trim().length > 0
+        ? session.threadName.trim()
+        : null;
     const presetLabel =
       session.presetSource === "session"
         ? getLoopPresetLabel(session.preset)
@@ -124,7 +124,7 @@ export function buildTelegramStatusText(
       `${formatTelegramSessionLabel({
         cwd: session.cwd,
         sessionRef: session.sessionRef,
-        title,
+        title: threadName,
       })}: ${presetLabel}`,
     );
   }

@@ -94,6 +94,7 @@ export type UpdateLoopNotificationInput = CreateLoopNotificationInput & {
 };
 
 export type LoopSession = {
+  threadId: string;
   sessionId: string;
   sessionRef: string;
   source: "startup" | "resume" | "stop";
@@ -111,6 +112,7 @@ export type LoopSession = {
   completionCheckWaitForReply: boolean;
   effectiveCompletionCheckId: string | null;
   effectiveCompletionCheckWaitForReply: boolean;
+  threadName: string | null;
   title: string | null;
   transcriptPath: string | null;
   lastAssistantMessage: string | null;

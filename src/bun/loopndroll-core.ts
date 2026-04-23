@@ -10,6 +10,7 @@ import type {
   LoopPreset,
   LoopScope,
   LoopSession,
+  LoopndrollSnapshot,
   LoopSessionPresetSource,
   LoopndrollRuntimeState,
 } from "../shared/app-rpc";
@@ -19,6 +20,7 @@ import {
   LOOP_SCOPE_VALUES,
   LOOP_SESSION_SOURCE_VALUES,
 } from "./constants";
+import type { CanonicalThreadDiscoveryRecord } from "./codex-app-server-client";
 import { getLoopndrollDatabase } from "./db/client";
 import {
   completionChecks,
@@ -27,6 +29,7 @@ import {
   sessions,
   settings,
 } from "./db/schema";
+import { looksInternalThreadNameArtifact } from "./thread-name-artifact";
 
 export type HookHandler = {
   type?: string;
@@ -474,13 +477,13 @@ export function notificationInsertFromValue(
 }
 
 export function buildNewSession(
-  sessionId: string,
+  threadId: string,
   sessionRef: string,
 ): typeof sessions.$inferInsert {
   const timestamp = nowIsoString();
 
   return {
-    sessionId,
+    threadId,
     sessionRef,
     source: "startup",
     cwd: null,
@@ -493,7 +496,7 @@ export function buildNewSession(
     presetOverridden: false,
     completionCheckId: null,
     completionCheckWaitForReply: false,
-    title: null,
+    threadName: null,
     transcriptPath: null,
     lastAssistantMessage: null,
   };
@@ -592,7 +595,8 @@ function mapSessionRow(
       );
 
   return {
-    sessionId: row.sessionId,
+    threadId: row.threadId,
+    sessionId: row.threadId,
     sessionRef: row.sessionRef,
     source: LOOP_SESSION_SOURCE_VALUES.includes(row.source) ? row.source : "startup",
     cwd: row.cwd,
@@ -609,24 +613,36 @@ function mapSessionRow(
     completionCheckWaitForReply: completionCheckState.completionCheckWaitForReply,
     effectiveCompletionCheckId: completionCheckState.effectiveCompletionCheckId,
     effectiveCompletionCheckWaitForReply: completionCheckState.effectiveCompletionCheckWaitForReply,
-    title: row.title,
+    threadName: row.threadName,
+    title: row.threadName,
     transcriptPath: row.transcriptPath,
     lastAssistantMessage: row.lastAssistantMessage,
   };
 }
 
-export function isPromptOnlyArtifact(
-  session: Pick<LoopSession, "transcriptPath" | "title" | "lastAssistantMessage">,
-) {
-  if (session.transcriptPath !== null) {
-    return false;
+export function mergeCanonicalThreadDiscoveryIntoSession(
+  session: Pick<LoopSession, "threadId" | "threadName" | "cwd">,
+  discovery: CanonicalThreadDiscoveryRecord | null,
+): Pick<LoopSession, "threadId" | "threadName" | "cwd"> {
+  if (discovery === null) {
+    return session;
   }
 
-  const titleLooksInternal = session.title?.startsWith("You are a helpful assistant.") ?? false;
+  return {
+    threadId: discovery.threadId,
+    threadName: discovery.threadName,
+    cwd: discovery.cwd,
+  };
+}
+
+export function isPromptOnlyArtifact(
+  session: Pick<LoopSession, "transcriptPath" | "threadName" | "lastAssistantMessage">,
+) {
+  const threadNameLooksInternal = looksInternalThreadNameArtifact(session.threadName);
   const assistantPayloadLooksInternal =
     session.lastAssistantMessage?.startsWith('{"title":') ?? false;
 
-  return titleLooksInternal || assistantPayloadLooksInternal;
+  return threadNameLooksInternal || assistantPayloadLooksInternal;
 }
 
 export function getSettingsRow() {
@@ -699,7 +715,7 @@ export function getStoredGlobalNotificationId(db: NotificationDefaultsReader) {
 
 export function applyGlobalNotificationToSession(
   tx: NotificationDefaultsWriter,
-  sessionId: string,
+  threadId: string,
   notificationId: string | null,
 ) {
   if (notificationId === null) {
@@ -708,14 +724,14 @@ export function applyGlobalNotificationToSession(
 
   tx.insert(sessionNotifications)
     .values({
-      sessionId,
+      threadId,
       notificationId,
     })
     .onConflictDoNothing()
     .run();
 }
 
-export function readSnapshotFromDatabase() {
+export function readSnapshotFromDatabase(): Omit<LoopndrollSnapshot, "health"> {
   const { db } = getLoopndrollDatabase(getLoopndrollPaths().databasePath);
   const settingsRow = getSettingsRow();
   const completionCheckRows = db
@@ -731,12 +747,12 @@ export function readSnapshotFromDatabase() {
   const sessionRows = db
     .select()
     .from(sessions)
-    .orderBy(asc(sessions.firstSeenAt), asc(sessions.sessionId))
+    .orderBy(asc(sessions.firstSeenAt), asc(sessions.threadId))
     .all();
   const sessionNotificationRows = db
     .select()
     .from(sessionNotifications)
-    .orderBy(asc(sessionNotifications.sessionId), asc(sessionNotifications.notificationId))
+    .orderBy(asc(sessionNotifications.threadId), asc(sessionNotifications.notificationId))
     .all();
   const normalizedGlobalCompletionCheckId = normalizeGlobalCompletionCheckId(
     completionCheckRows.map((row) => row.id),
@@ -745,13 +761,13 @@ export function readSnapshotFromDatabase() {
 
   const notificationIdMap = new Map<string, string[]>();
   for (const row of sessionNotificationRows) {
-    const current = notificationIdMap.get(row.sessionId);
+    const current = notificationIdMap.get(row.threadId);
     if (current) {
       current.push(row.notificationId);
       continue;
     }
 
-    notificationIdMap.set(row.sessionId, [row.notificationId]);
+    notificationIdMap.set(row.threadId, [row.notificationId]);
   }
 
   return {
@@ -772,7 +788,7 @@ export function readSnapshotFromDatabase() {
       .map((row) =>
         mapSessionRow(
           row,
-          notificationIdMap.get(row.sessionId) ?? [],
+          notificationIdMap.get(row.threadId) ?? [],
           normalizeLoopPreset(settingsRow.globalPreset),
           normalizedGlobalCompletionCheckId,
           settingsRow.globalCompletionCheckWaitForReply,

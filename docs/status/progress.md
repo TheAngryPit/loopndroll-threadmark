@@ -1,0 +1,36 @@
+# Progress
+
+- Goal: `full product v1 working`
+- Current state:
+  - product/runtime seam fixed for the `thread_id` / `thread_name` schema
+  - on-open canonical thread-name refresh is now wired into `ensureLoopndrollSetup()`
+  - local desktop build is proven:
+    - Bun-hosted renderer build: pass
+    - `electrobun build`: pass
+    - unsigned local app bundle launches and stays up long enough to complete setup
+  - repo static checks are green from local binaries:
+    - `oxlint`: pass
+    - `oxfmt --check`: pass
+    - `tsgo --noEmit -p tsconfig.json`: pass
+  - focused + full Bun test suite: pass (`44 pass`, `0 fail`)
+  - passive app-server runtime smoke: pass
+  - the launch-time refresh corrected stale stored thread names in the local product DB, including:
+    - `C1` -> `Verificar loopndroll seguro`
+    - `C4` -> `Iniciar investigação forense`
+    - `C5` -> `Planeia setup local Open WebUI`
+    - `C6` -> `Build freelancer pricing engine`
+    - `C25` -> `Memory Writing Agent: Phase 2 (Consolidation)`
+  - the product snapshot now exposes only the corrected visible rows:
+    - `C1`, `C4`, `C5`, `C6`, `C25`, `C26`
+  - fringe-case unresolved internal titles are now fail-closed at the snapshot boundary
+    - raw DB artifacts may still exist
+    - but internal prompt/instruction titles no longer surface in the supported product snapshot, even when a transcript path exists
+- Strongest safe proof:
+  - `code_proven`
+  - `test_proven`
+  - `runtime_proven`
+- Strongest contradiction still open:
+  - thread-name refresh still depends on canonical discovery or transcript availability
+  - hidden prompt-only artifacts can still remain in the raw DB until explicit cleanup work exists
+- Next true executable task:
+  - continue from the next remaining product/runtime contradiction outside thread-name refresh

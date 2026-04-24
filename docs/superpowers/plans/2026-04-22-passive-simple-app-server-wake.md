@@ -4,7 +4,7 @@
 
 **Goal:** Add a bounded `passive-simple` wake path that keeps the current Telegram flow and hook-based `await-reply`, but lets `passive` attempt a best-effort wake through Codex app-server before falling back to the existing queue.
 
-**Architecture:** Keep `await-reply` unchanged. For `passive`, queue the remote prompt first, then try a minimal local app-server wake against canonical `threadId` truth. Use app-server as the source of truth for `threadId`, `threadName`, and project discovery by `cwd`; keep `sessionRef` only as the local Telegram/operator tag. In this product, Telegram is the remote lane and Loopndroll talks to the local app-server on the same machine. If wake succeeds, clear the one-shot queue and send `Working on ...`; if wake is unavailable or fails, preserve the queue and send the current `Received ...` acknowledgement.
+**Architecture:** Keep `await-reply` unchanged. For `passive`, queue the remote prompt first, then try a minimal local app-server wake against canonical `threadId` truth. Use app-server as the source of truth for `threadId`, `threadName`, and project discovery by `cwd`; keep `sessionRef` only as the local Telegram/operator tag. In this product, Telegram is the remote lane and Loopndroll talks to the local app-server on the same machine. If wake is accepted and the thread is freshly observed as active after `turn/start`, clear the one-shot queue and send `Working on ...`; if wake is unavailable, fails, or cannot prove active thread state, preserve the queue and send the current `Received ...` acknowledgement.
 
 **Tech Stack:** TypeScript, Bun, Electrobun, SQLite, Codex app-server JSON-RPC over stdio, Bun test.
 
@@ -1591,6 +1591,118 @@ Leakage check:
 - no installer/product/runtime proof leakage
 - no later-tranche behavior leakage
 
+### Tranche I: Local Product V1 Proof Closure
+
+**Goal:** Convert the current materially-working local product state into an honest `full product v1 working locally` claim, or expose the next real blocker without adding release/signing/notarization scope.
+
+**Closure bar:**
+- latest source changes pass full repo static checks
+- latest source changes pass the full Bun test suite
+- renderer build completes from the supported local toolchain path
+- Electrobun desktop build completes from the fresh renderer output
+- local desktop bundle launches and reaches a product snapshot
+- product snapshot does not expose hidden orphan/thread-name artifacts
+- runtime proof remains bounded to local product v1 and does not claim release distribution
+
+**Scope lock:**
+- no GitHub release
+- no signing
+- no notarization
+- no updater/feed publishing
+- no installer packaging beyond local Electrobun build
+- no new product feature work unless a proof row exposes a concrete local defect
+
+- [ ] **Nanotask I.1: Run full repo static checks after the latest product-prune changes**
+
+Run:
+- `node_modules/.bin/oxlint src electrobun.config.ts vite.config.ts --deny-warnings`
+- `node_modules/.bin/oxfmt --check src electrobun.config.ts vite.config.ts`
+- `node_modules/.bin/tsgo --noEmit -p tsconfig.json`
+
+Required outcome:
+- capture true pass/fail state
+- if a check exposes a local defect inside the latest product-prune slice, apply the minimum fix and rerun only the failed check first
+- do not widen into release or installer work
+
+- [ ] **Nanotask I.2: Run the full Bun test suite**
+
+Run:
+- `bun test`
+
+Required outcome:
+- capture true pass/fail state for the current repo
+- if a test exposes a local defect inside current product v1 behavior, apply the minimum fix and rerun the focused failing file before rerunning full suite
+
+- [ ] **Nanotask I.3: Run renderer build proof**
+
+Run first:
+- `node_modules/.bin/vite build`
+
+If host-Node Vite hangs or fails due to the already-known host toolchain path, record that explicitly and run:
+- `bun ./node_modules/vite/bin/vite.js build`
+
+Required outcome:
+- capture true renderer build state
+- do not treat host-toolchain setup noise as product defect unless the Bun-hosted supported path also fails
+
+- [ ] **Nanotask I.4: Run Electrobun desktop build proof**
+
+Run:
+- `./node_modules/.bin/electrobun build`
+
+Required outcome:
+- capture true local desktop build state
+- no signing, notarization, release, or updater proof claims
+
+- [ ] **Nanotask I.5: Launch the local desktop bundle and capture setup snapshot truth**
+
+Run the local unsigned bundle:
+- `open build/dev-macos-arm64/Loopndroll-dev.app`
+
+Capture:
+- process starts and remains alive long enough for setup
+- `ensureLoopndrollSetup()` snapshot contains the expected visible sessions
+- no hidden internal thread-name artifact appears in the supported snapshot
+
+Required outcome:
+- `runtime_proven` only for the local unsigned desktop bundle
+
+- [ ] **Nanotask I.6: Run the local passive runtime smoke probe after the fresh build**
+
+Run:
+- `bun run scripts/passive_simple_runtime_probe.ts --cwd /Users/vitorcepedalopes/Documents/00_TheAngryPitCode_Codex/APPS_Pit/loopndroll-threadmark`
+
+Required outcome:
+- capture whether local app-server discovery and passive runtime smoke still pass after the latest changes
+- no Telegram live-token proof unless separately authorized
+
+- [ ] **Nanotask I.7: Audit local product v1 proof and classify remaining debt**
+
+Audit:
+- static proof
+- test proof
+- renderer build proof
+- desktop build proof
+- runtime snapshot proof
+- passive smoke proof
+
+Required outcome:
+- state whether `full product v1 working locally` is honestly reached
+- explicitly separate remaining debt into:
+  - release/deployment debt
+  - product-proof debt
+  - environment/toolchain debt
+
+- [ ] **Nanotask I.8: Checkpoint Tranche I and update progress**
+
+Update:
+- `docs/status/progress.md`
+- this checkpoint log
+
+Required outcome:
+- checkpoint the strongest safe truth
+- do not claim shipped/released unless release distribution proof exists
+
 ---
 
 ## Exit Criteria
@@ -1602,7 +1714,7 @@ Leakage check:
 - app-server transport is local to the machine running Loopndroll
 - `passive` attempts best-effort wake via app-server
 - target resolution uses stored `threadId` first, then unique `cwd` discovery, else fails closed
-- wake success produces `Working on ...`
+- wake success produces `Working on ...` only after a fresh active thread observation
 - wake failure preserves queue and produces `Received ...`
 - no Pi, registry, or rework semantics leaked into `v1`
 - static checks pass

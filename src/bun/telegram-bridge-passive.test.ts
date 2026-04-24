@@ -13,7 +13,7 @@ function createPromptTable(db: Database) {
 }
 
 describe("handlePassiveReplyCommand", () => {
-  test("queues first and returns Working on when passive /reply wake succeeds", async () => {
+  test("queues first, preserves the one-shot prompt, and returns Working when passive wake is active", async () => {
     const db = new Database(":memory:");
     createPromptTable(db);
     let promptWasQueuedBeforeWake = false;
@@ -57,7 +57,42 @@ describe("handlePassiveReplyCommand", () => {
     expect(result).toEqual({
       ackText: "Working on [project] [C22] Fix passive wake.",
     });
-    expect(rowAfterWake).toBeNull();
+    expect(rowAfterWake).toEqual({
+      prompt_text: "Continue with the Telegram reply.",
+    });
+  });
+
+  test("defaults to queue-only until live Codex app UI sync is available", async () => {
+    const db = new Database(":memory:");
+    createPromptTable(db);
+
+    const result = await handlePassiveReplyCommand({
+      db,
+      targetSession: {
+        sessionId: "thr_123",
+        sessionRef: "C22",
+        cwd: "/tmp/project",
+        title: "Fix passive wake",
+      },
+      promptText: "Continue with the Telegram reply.",
+      message: {
+        chat: { id: "1" },
+        message_id: 1,
+      },
+    });
+
+    expect(result).toEqual({
+      ackText: "Received for [project] [C22] Fix passive wake.",
+    });
+    expect(
+      db
+        .query(
+          "select prompt_text from session_remote_prompts where thread_id = ? and delivery_mode = 'once'",
+        )
+        .get("thr_123"),
+    ).toEqual({
+      prompt_text: "Continue with the Telegram reply.",
+    });
   });
 });
 

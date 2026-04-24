@@ -1,11 +1,6 @@
 import { type Database } from "bun:sqlite";
 import type { LoopPreset, LoopSession } from "../shared/app-rpc";
-import {
-  attemptPassiveWakeViaCodexAppServer,
-  createSpawnedCodexAppServerTransport,
-  type PassiveWakeInput,
-  type PassiveWakeResult,
-} from "./codex-app-server-client";
+import type { PassiveWakeInput, PassiveWakeResult } from "./codex-app-server-client";
 import {
   isPersistentPromptPreset,
   normalizeLoopPreset,
@@ -181,6 +176,38 @@ export function findLatestAwaitingTelegramSessionId(
   return typeof row?.session_id === "string" && row.session_id.length > 0 ? row.session_id : null;
 }
 
+export function findLatestPassiveTelegramReceiptSessionIdBeforeMessage(
+  db: Database,
+  botToken: string,
+  chatId: string,
+  messageId: number,
+) {
+  const row = db
+    .query(
+      `select r.thread_id as session_id
+      from telegram_delivery_receipts r
+      inner join sessions s on s.thread_id = r.thread_id
+      left join settings st on st.id = 1
+      where r.bot_token = ?
+        and r.chat_id = ?
+        and r.telegram_message_id < ?
+        and s.archived = 0
+        and (
+          s.preset = 'passive'
+          or (
+            s.preset is null
+            and s.preset_overridden = 0
+            and st.global_preset = 'passive'
+          )
+        )
+      order by r.telegram_message_id desc, r.created_at desc
+      limit 1`,
+    )
+    .get(botToken, chatId, messageId) as { session_id?: string } | null;
+
+  return typeof row?.session_id === "string" && row.session_id.length > 0 ? row.session_id : null;
+}
+
 export function findTelegramSessionByRef(
   db: Database,
   botToken: string,
@@ -327,6 +354,43 @@ export function clearRemotePromptStateForGlobalPreset(db: Database, preset: Loop
   }
 }
 
+export function disableTelegramSessionViaFailsafe(db: Database, sessionId: string) {
+  const applyUpdate = db.transaction(() => {
+    db.query(
+      `update sessions
+       set preset = null,
+           preset_overridden = 1,
+           active_since = null
+       where thread_id = ?
+         and archived = 0`,
+    ).run(sessionId);
+
+    db.query("delete from session_runtime where thread_id = ?").run(sessionId);
+    db.query("delete from session_awaiting_replies where thread_id = ?").run(sessionId);
+    db.query("delete from session_remote_prompts where thread_id = ?").run(sessionId);
+  });
+
+  applyUpdate();
+}
+
+export function disableAllTelegramSessionsViaFailsafe(db: Database) {
+  const applyUpdate = db.transaction(() => {
+    db.query("update settings set global_preset = null where id = 1").run();
+    db.run(
+      `update sessions
+       set preset = null,
+           preset_overridden = 1,
+           active_since = null
+       where archived = 0`,
+    );
+    db.query("delete from session_runtime").run();
+    db.query("delete from session_awaiting_replies").run();
+    db.query("delete from session_remote_prompts").run();
+  });
+
+  applyUpdate();
+}
+
 export function upsertSessionRemotePrompt(
   db: Database,
   sessionId: string,
@@ -411,22 +475,11 @@ function upsertPassiveThreadRemotePrompt(
   return true;
 }
 
-async function wakePassiveThreadViaAppServer(input: PassiveWakeInput): Promise<PassiveWakeResult> {
-  let transport;
-  try {
-    transport = await createSpawnedCodexAppServerTransport();
-    return await attemptPassiveWakeViaCodexAppServer(transport, input);
-  } catch (error) {
-    return {
-      status: "failed",
-      reason: "app-server-wake-failed",
-      detail: error instanceof Error ? error.message : String(error),
-    };
-  } finally {
-    await transport?.close().catch(() => {
-      // Ignore transport cleanup failures while preserving the bridge result.
-    });
-  }
+function passiveWakeUnavailableUntilLiveUiSync(): PassiveWakeResult {
+  return {
+    status: "unavailable",
+    reason: "codex-app-live-ui-sync-unavailable",
+  };
 }
 
 export async function handlePassiveReplyCommand(input: {
@@ -443,7 +496,7 @@ export async function handlePassiveReplyCommand(input: {
     input.message,
   );
 
-  const wake = input.wake ?? wakePassiveThreadViaAppServer;
+  const wake = input.wake ?? (() => Promise.resolve(passiveWakeUnavailableUntilLiveUiSync()));
   const result = await tryPassiveSimpleWake({
     db: input.db,
     threadId: input.targetSession.sessionId,
@@ -473,7 +526,7 @@ export async function handlePassiveReplyDelivery(input: {
     input.message,
   );
 
-  const wake = input.wake ?? wakePassiveThreadViaAppServer;
+  const wake = input.wake ?? (() => Promise.resolve(passiveWakeUnavailableUntilLiveUiSync()));
   const result = await tryPassiveSimpleWake({
     db: input.db,
     threadId: input.targetSession.sessionId,

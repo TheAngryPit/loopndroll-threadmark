@@ -32,10 +32,10 @@ export async function tryPassiveSimpleWake(
     prompt: input.promptText,
   });
 
-  if (wakeResult.status !== "accepted") {
+  if (wakeResult.status === "accepted") {
     return {
-      status: "queued",
-      ackText: buildTelegramPromptReceivedText({
+      status: "woke",
+      ackText: buildTelegramWorkingAckText({
         cwd: input.cwd ?? null,
         sessionRef: input.sessionRef ?? null,
         title: input.threadName ?? null,
@@ -43,13 +43,9 @@ export async function tryPassiveSimpleWake(
     };
   }
 
-  input.db
-    .query("delete from session_remote_prompts where thread_id = ? and delivery_mode = 'once'")
-    .run(input.threadId);
-
   return {
-    status: "woke",
-    ackText: buildTelegramWorkingAckText({
+    status: "queued",
+    ackText: buildTelegramPromptReceivedText({
       cwd: input.cwd ?? null,
       sessionRef: input.sessionRef ?? null,
       title: input.threadName ?? null,

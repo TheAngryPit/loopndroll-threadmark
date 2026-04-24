@@ -328,6 +328,8 @@ export async function sendTelegramBridgeMessage(botToken: string, chatId: string
   if (!payload.ok) {
     throw new Error(payload.description || "Telegram sendMessage failed.");
   }
+
+  return payload;
 }
 
 async function fetchTelegramChatDetails(botToken: string, chatId: string) {

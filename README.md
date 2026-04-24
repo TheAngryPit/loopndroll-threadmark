@@ -1,7 +1,3 @@
-
-
-
-
 <h1 align="center">Loopndroll</h1>
 
 <p align="center"><strong>Let Codex run until the task is actually done.</strong></p>
@@ -51,12 +47,38 @@ This gives you a simple choice: keep pushing automatically, wait for human input
 ## Hook lifecycle
 
 Loopndroll manages its own Codex hook entries. It does not need to turn off other Codex hooks.
+Codex can load matching hooks from both the global `~/.codex/hooks.json` file and repo-local
+`<repo>/.codex/hooks.json` files, so Loopndroll treats hook installation as a multi-file surface.
 
 - **Running**: the managed hook is installed and active
 - **Paused**: the managed hook stays installed, but Loopndroll ignores new remote control actions and stop-side effects
-- **Stopped**: Loopndroll removes only its own managed hook entries and stops responding until you start it again
+- **Stopped**: Loopndroll removes only its own managed hook entries from known hook files and stops responding until you start it again
 
 This lets you pause or stop Loopndroll without clearing unrelated hooks from Codex.
+
+Operational safety rule: `Paused` means the managed hook is installed but inert, not
+removed. Removing Loopndroll-managed entries from hook files must not be presented as
+proof that a live Codex runtime has unloaded those hooks. Full removal is complete only
+when the stronger live-runtime step can be safely proven. If active processes or session
+risk are present, Loopndroll applies a soft pause, records a pending full-removal action,
+and retries completion when the app-server lane is idle. It never kills active work just
+to create fake closure.
+
+The pending-removal watcher is singleton guarded by an atomic lock at
+`~/Library/Application Support/loopndroll/state/hook-removal-watch.lock`. The lock records
+the owner `pid`, start time, repo root, hooks path, and runtime-state path. A second watcher
+must exit cleanly with `watcher already running` while the owner PID is alive; stale locks are
+replaced only after the recorded PID is gone.
+
+Emergency stop for a standalone hook-management watcher process:
+
+```sh
+pkill -TERM -f 'theinvoker-manage-hooks.mjs --action watch-pending-removal'
+pgrep -fl theinvoker-manage-hooks.mjs
+```
+
+The second command should return no watcher process. In the desktop app path, closing or
+terminating the Loopndroll process releases the same lock through the shutdown handlers.
 
 ## Use cases
 

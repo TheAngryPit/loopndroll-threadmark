@@ -9,6 +9,7 @@ export {
   revealHooksFile,
   resumeLoopndroll,
   startLoopndroll,
+  startHookRemovalPendingMonitor,
   stopLoopndroll,
 } from "./hook-management";
 export {

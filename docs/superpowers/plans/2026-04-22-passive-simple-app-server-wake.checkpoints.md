@@ -2547,3 +2547,962 @@
 - strongest safe truth:
   - Loopndroll now fails closed for unresolved internal thread-name artifacts at the supported snapshot boundary
   - raw DB cleanup remains separate work, but the product surface no longer leaks those fringe-case names
+
+## 2026-04-23 - Hard-delete prune for hidden orphan thread artifacts
+
+- task: `hard delete hidden orphan artifact rows after 3 setup/open misses`
+- status: completed
+- scope:
+  - updated `src/bun/db/schema.ts`
+  - updated `src/bun/db/migrations.ts`
+  - updated `src/bun/thread-name-refresh.ts`
+  - updated `src/bun/thread-name-refresh.test.ts`
+  - updated `src/bun/hook-management.ts`
+- strongest contradiction found:
+  - hiding internal-title rows from the snapshot fixed the product surface, but stale orphan rows could still stay forever in the raw DB
+  - the requested behavior was stronger: if a hidden row keeps missing canonical discovery across repeated open/setup passes, it should be pruned from history
+- fixes landed:
+  - added persisted `orphaned_refresh_miss_count` state on `sessions`
+  - launch/setup refresh now:
+    - increments the miss count for hidden internal-title rows that still do not exist in canonical discovery
+    - resets the miss count if the row is recovered or no longer qualifies
+    - hard deletes the row once it reaches 3 misses
+  - the delete uses the existing `thread_id` foreign-key cascade path
+- fresh proof:
+  - focused tests:
+    - `bun test src/bun/thread-name-artifact.test.ts src/bun/loopndroll-core.test.ts src/bun/thread-name-refresh.test.ts src/bun/thread-name-transcript.test.ts src/bun/hook-management-product.test.ts`
+    - pass
+    - `12 pass`
+    - `0 fail`
+  - static proof:
+    - `node_modules/.bin/oxlint src/bun/thread-name-artifact.ts src/bun/thread-name-artifact.test.ts src/bun/loopndroll-core.ts src/bun/loopndroll-core.test.ts src/bun/thread-name-refresh.ts src/bun/thread-name-refresh.test.ts src/bun/thread-name-transcript.ts src/bun/thread-name-transcript.test.ts src/bun/hook-management.ts src/bun/hook-management-product.test.ts src/bun/db/schema.ts src/bun/db/migrations.ts --deny-warnings`
+    - pass
+    - `node_modules/.bin/tsgo --noEmit -p tsconfig.json`
+    - pass
+  - runtime product proof:
+    - `./node_modules/.bin/electrobun build`
+    - pass
+    - local app bundle relaunched on the writable product path
+    - `C27` initially existed with `orphaned_refresh_miss_count = 1`
+    - after a full relaunch/open pass with enough hydrate time, `C27` no longer existed in `~/Library/Application Support/loopndroll/app.db`
+    - supported snapshot still exposed only:
+      - `C1`, `C4`, `C5`, `C6`, `C25`, `C26`
+- strongest safe truth:
+  - hidden orphan artifact rows are now eventually removed from the real product DB after 3 setup/open misses
+  - repo-side shell proof of that write path is still limited by `SQLITE_READONLY`, but the local desktop bundle path is runtime-proven
+
+## 2026-04-23 - Tranche I Nanotask Decomposition
+
+- task: `Decompose Tranche I into strict-serial local product v1 proof-closure nanotasks`
+- status: completed
+- scope:
+  - updated `docs/superpowers/plans/2026-04-22-passive-simple-app-server-wake.md`
+  - updated `docs/status/progress.md`
+  - updated this checkpoint log
+- strongest contradiction found:
+  - thread-name and orphan-prune behavior are now proven locally, but the governing goal is still `full product v1 working`
+  - the next closure-bearing work is not more feature development; it is a fresh full local product proof pass over the current source state
+- decomposition landed:
+  - `Nanotask I.1: Run full repo static checks after the latest product-prune changes`
+  - `Nanotask I.2: Run the full Bun test suite`
+  - `Nanotask I.3: Run renderer build proof`
+  - `Nanotask I.4: Run Electrobun desktop build proof`
+  - `Nanotask I.5: Launch the local desktop bundle and capture setup snapshot truth`
+  - `Nanotask I.6: Run the local passive runtime smoke probe after the fresh build`
+  - `Nanotask I.7: Audit local product v1 proof and classify remaining debt`
+  - `Nanotask I.8: Checkpoint Tranche I and update progress`
+- proof level:
+  - `implemented`
+  - `code_proven`
+- strongest safe truth:
+  - the active execution structure is now re-anchored to local product v1 proof closure
+  - no release, signing, notarization, updater, or public distribution proof is included in Tranche I
+- next true executable task:
+  - `Nanotask I.1: Run full repo static checks after the latest product-prune changes`
+
+## 2026-04-23 - Nanotask I.1
+
+- task: `Nanotask I.1: Run full repo static checks after the latest product-prune changes`
+- status: completed
+- scope:
+  - static-check proof only
+  - applied the minimum formatting fix required by the proof row
+- audit verdict on previous row:
+  - `Tranche I Nanotask Decomposition` remained bounded to planning surfaces only
+  - no drift into release, signing, notarization, updater, or new product behavior
+- proof commands:
+  - `node_modules/.bin/oxlint src electrobun.config.ts vite.config.ts --deny-warnings`
+    - pass
+  - `node_modules/.bin/oxfmt --check src electrobun.config.ts vite.config.ts`
+    - first run failed on formatting in:
+      - `src/bun/thread-name-artifact.test.ts`
+      - `src/bun/thread-name-refresh.ts`
+    - applied minimum fix:
+      - `node_modules/.bin/oxfmt src/bun/thread-name-artifact.test.ts src/bun/thread-name-refresh.ts`
+    - rerun pass
+  - `node_modules/.bin/tsgo --noEmit -p tsconfig.json`
+    - pass
+- proof level:
+  - `test_proven` for the static-check gate
+- tranche progress:
+  - `12.5%` (`1/8` rows)
+- next true executable task:
+  - `Nanotask I.2: Run the full Bun test suite`
+
+## 2026-04-23 - Nanotask I.2
+
+- task: `Nanotask I.2: Run the full Bun test suite`
+- status: completed
+- scope:
+  - full automated Bun test proof only
+- audit verdict on previous row:
+  - `Nanotask I.1` stayed bounded to static-check proof and the minimum formatting fix required by that proof
+  - no drift into release, installer, or new product behavior
+- proof command:
+  - `bun test`
+    - pass
+    - `55 pass`
+    - `0 fail`
+    - `107 expect() calls`
+    - `20 files`
+- proof level:
+  - `test_proven`
+- tranche progress:
+  - `25%` (`2/8` rows)
+- next true executable task:
+  - `Nanotask I.3: Run renderer build proof`
+
+## 2026-04-23 - Nanotask I.3
+
+- task: `Nanotask I.3: Run renderer build proof`
+- status: completed
+- scope:
+  - renderer production build proof only
+- audit verdict on previous row:
+  - `Nanotask I.2` stayed bounded to full Bun test proof
+  - no product behavior or release scope changed
+- proof command:
+  - `node_modules/.bin/vite build`
+    - pass
+    - `7732 modules transformed`
+    - built in `12.61s`
+    - output included:
+      - `dist/index.html`
+      - `dist/assets/index-D0WUYDht.css`
+      - `dist/assets/browser-Bp00Ik0S.js`
+      - `dist/assets/index-B6nNylCj.js`
+- non-blocking warnings:
+  - Vite reported significant time in plugin `rolldown:vite-resolve`
+  - Vite reported a chunk larger than `500 kB` after minification
+- proof level:
+  - `runtime_proven` for renderer build completion
+- debt classification:
+  - environment/toolchain debt: none for this row because the plain command completed
+  - product-proof debt: none for renderer build completion
+  - optimization debt: chunk-size warning remains non-blocking
+- tranche progress:
+  - `37.5%` (`3/8` rows)
+- next true executable task:
+  - `Nanotask I.4: Run Electrobun desktop build proof`
+
+## 2026-04-23 - Nanotask I.4
+
+- task: `Nanotask I.4: Run Electrobun desktop build proof`
+- status: completed
+- scope:
+  - local unsigned desktop build proof only
+- audit verdict on previous row:
+  - `Nanotask I.3` stayed bounded to renderer build proof
+  - renderer warnings were classified as non-blocking optimization debt, not release closure
+- proof command:
+  - `./node_modules/.bin/electrobun build`
+    - pass
+    - config used: `electrobun.config.ts`
+    - `skipping codesign`
+    - `skipping notarization`
+- proof level:
+  - `runtime_proven` for local desktop build completion
+- debt classification:
+  - release/deployment debt: signing and notarization intentionally remain unproven
+  - product-proof debt: none for local desktop build completion
+- tranche progress:
+  - `50%` (`4/8` rows)
+- next true executable task:
+  - `Nanotask I.5: Launch the local desktop bundle and capture setup snapshot truth`
+
+## 2026-04-23 - Nanotask I.5
+
+- task: `Nanotask I.5: Launch the local desktop bundle and capture setup snapshot truth`
+- status: completed
+- scope:
+  - local unsigned desktop bundle launch and setup snapshot proof only
+- audit verdict on previous row:
+  - `Nanotask I.4` stayed bounded to Electrobun desktop build proof
+  - no release, signing, notarization, or updater proof was claimed
+- proof steps:
+  - launched:
+    - `open build/dev-macos-arm64/Loopndroll-dev.app`
+  - waited for app setup/hydrate
+  - confirmed running processes:
+    - `Loopndroll-dev.app/Contents/MacOS/launcher`
+    - bundled `bun .../Resources/main.js`
+  - captured supported setup snapshot via `ensureLoopndrollSetup()`
+- supported snapshot rows:
+  - `C1` -> `Verificar loopndroll seguro`
+  - `C4` -> `Iniciar investigação forense`
+  - `C5` -> `Planeia setup local Open WebUI`
+  - `C6` -> `Build freelancer pricing engine`
+  - `C25` -> `Memory Writing Agent: Phase 2 (Consolidation)`
+  - `C26` -> `Reverter remodex completo`
+- artifact checks:
+  - `C27` not visible in supported snapshot
+  - no internal prompt/instruction thread names visible in supported snapshot
+  - raw DB lookup for `C27` returned `null`
+- proof level:
+  - `runtime_proven` for local unsigned desktop launch and setup snapshot truth
+- tranche progress:
+  - `62.5%` (`5/8` rows)
+- next true executable task:
+  - `Nanotask I.6: Run the local passive runtime smoke probe after the fresh build`
+
+## 2026-04-23 - Nanotask I.6
+
+- task: `Nanotask I.6: Run the local passive runtime smoke probe after the fresh build`
+- status: completed
+- scope:
+  - local app-server passive/runtime smoke only
+  - no Telegram live-token proof
+- audit verdict on previous row:
+  - `Nanotask I.5` stayed bounded to local desktop launch and setup snapshot truth
+  - no installer or release claims were added
+- proof command:
+  - `bun run scripts/passive_simple_runtime_probe.ts --cwd /Users/vitorcepedalopes/Documents/00_TheAngryPitCode_Codex/APPS_Pit/loopndroll-threadmark`
+    - pass
+    - `status: ok`
+    - `threadCount: 1`
+    - discovered thread:
+      - `019da4cd-6d70-7203-bd78-d3f52e08ee53`
+      - `Verificar loopndroll seguro`
+- proof level:
+  - `runtime_proven` for local app-server discovery/runtime smoke
+- tranche progress:
+  - `75%` (`6/8` rows)
+- next true executable task:
+  - `Nanotask I.7: Audit local product v1 proof and classify remaining debt`
+
+## 2026-04-23 - Nanotask I.7
+
+- task: `Nanotask I.7: Audit local product v1 proof and classify remaining debt`
+- status: completed
+- scope:
+  - audit-only row for Tranche I proof gathered so far
+- audit verdict on previous row:
+  - `Nanotask I.6` stayed bounded to local app-server discovery/runtime smoke
+  - no live Telegram-token proof, release proof, or installer proof was added
+- proof map:
+  - static proof:
+    - `oxlint`: pass
+    - `oxfmt --check`: pass after minimum formatting fix in `I.1`
+    - `tsgo --noEmit -p tsconfig.json`: pass
+  - automated tests:
+    - `bun test`: pass
+    - `55 pass`
+    - `0 fail`
+  - renderer build:
+    - `node_modules/.bin/vite build`: pass
+    - warnings remain non-blocking optimization debt
+  - desktop build:
+    - `./node_modules/.bin/electrobun build`: pass
+    - unsigned local build only
+  - local product runtime:
+    - `Loopndroll-dev.app` launched
+    - app process stayed alive long enough for setup/hydrate
+    - supported setup snapshot exposed only `C1`, `C4`, `C5`, `C6`, `C25`, `C26`
+    - no hidden internal prompt/instruction thread name surfaced
+    - `C27` was absent from the raw DB
+  - passive local runtime:
+    - passive runtime smoke returned `status: ok`
+    - local app-server discovery found the repo thread
+- proof leak check:
+  - no signing claim
+  - no notarization claim
+  - no updater/feed publishing claim
+  - no public release claim
+  - no live Telegram-token end-to-end claim
+- debt classification:
+  - release/deployment debt:
+    - signing, notarization, updater/feed publishing, and public distribution remain unproven
+  - product-proof debt:
+    - live Telegram-token end-to-end proof is not captured in this tranche
+  - environment/toolchain debt:
+    - shell-invoked repo-side setup remains `SQLITE_READONLY` for writes to the real product DB on this machine
+    - DB write proof must continue through the local app bundle path
+  - optimization debt:
+    - renderer build warns about a large chunk and `rolldown:vite-resolve` timing
+- strongest safe truth:
+  - `full product v1 working locally` is honestly reached for the unsigned local bundle path
+  - shipped/released v1 is not claimed
+- proof level:
+  - `implemented`
+  - `code_proven`
+  - `test_proven`
+  - `runtime_proven`
+- tranche progress:
+  - `87.5%` (`7/8` rows)
+- next true executable task:
+  - `Nanotask I.8: Checkpoint Tranche I and update progress`
+
+## 2026-04-23 - Nanotask I.8
+
+- task: `Nanotask I.8: Checkpoint Tranche I and update progress`
+- status: completed
+- scope:
+  - final checkpoint and progress update for Tranche I
+- audit verdict on previous row:
+  - `Nanotask I.7` stayed bounded to proof audit and debt classification
+  - no release, signing, notarization, updater, public distribution, or live Telegram-token proof was inflated
+- final Tranche I proof summary:
+  - static checks:
+    - pass
+  - full Bun test suite:
+    - pass
+    - `55 pass`
+    - `0 fail`
+  - renderer build:
+    - pass
+  - local desktop build:
+    - pass
+  - local desktop launch and setup snapshot:
+    - pass
+  - local passive app-server smoke:
+    - pass
+- final Tranche I verdict:
+  - `full product v1 working locally` is reached for the unsigned local bundle path
+  - shipped/released v1 is not claimed
+- remaining explicit debt:
+  - release/deployment debt:
+    - signing, notarization, updater/feed publishing, and public distribution remain unproven
+  - product-proof debt:
+    - live Telegram-token end-to-end proof remains unproven
+  - environment/toolchain debt:
+    - shell-invoked repo-side setup remains `SQLITE_READONLY` for writes to the real product DB on this machine
+  - optimization debt:
+    - renderer build has non-blocking large chunk and plugin timing warnings
+- proof level:
+  - `implemented`
+  - `code_proven`
+  - `test_proven`
+  - `runtime_proven`
+- tranche progress:
+  - `100%` (`8/8` rows)
+- next program decision:
+  - cut a release/distribution tranche
+  - or cut a live Telegram-token end-to-end proof tranche
+
+## 2026-04-23 - Nanotask J.1
+
+- task: `Nanotask J.1: Copy installed app icon and correct readiness truth`
+- status: completed
+- scope:
+  - app icon only
+  - readiness wording only
+  - no Telegram live execution
+  - no release, signing, notarization, updater, or public distribution work
+- audit verdict on previous row:
+  - `Nanotask I.8` overstated the local proof as `full product v1 working locally` for operator readiness
+  - trim was needed because live Telegram-token end-to-end proof remains a readiness blocker
+- implementation:
+  - copied the installed macOS icon from `/Applications/Loopndroll.app/Contents/Resources/AppIcon.icns`
+  - stored the copied icon as `src/assets/AppIcon.icns`
+  - stored a 1024x1024 PNG companion as `src/assets/app-icon.png`
+  - disabled the invalid `.iconset` path for macOS builds
+  - added a post-build hook that copies `src/assets/AppIcon.icns` into the built macOS bundle
+- local defect found during proof:
+  - `iconutil` rejected the generated `.iconset` even when pixel dimensions were correct
+  - the first post-build hook path resolved to `Loopndroll-dev/...` instead of `Loopndroll-dev.app/...`
+- fix applied:
+  - changed the macOS path to copy a versioned `.icns` directly into `Contents/Resources/AppIcon.icns`
+  - normalized the post-build bundle path to append `.app` when Electrobun provides the app name without the suffix
+- proof:
+  - `./node_modules/.bin/electrobun build`: pass
+  - post-build hook copied the icon into `build/dev-macos-arm64/Loopndroll-dev.app/Contents/Resources/AppIcon.icns`
+  - `Info.plist` contains `CFBundleIconFile => AppIcon`
+  - SHA-256 match across installed source, versioned asset, and built bundle icon:
+    - `f9b6d55cff079f756d028d4a6e78a970611cdc754b4b461ce9f70c757e7240d8`
+  - `corepack pnpm run lint`: pass
+  - `corepack pnpm run format:check`: pass
+  - `corepack pnpm run typecheck`: pass
+  - `./node_modules/.bin/oxfmt --check electrobun.config.ts scripts/copy-macos-app-icon.ts`: pass
+  - `./node_modules/.bin/oxlint scripts/copy-macos-app-icon.ts --deny-warnings`: pass
+  - direct `pnpm check` could not run in this shell because `pnpm` is not on `PATH`; the three underlying scripts were run individually through `corepack pnpm`
+- proof level:
+  - `implemented`
+  - `code_proven`
+  - `test_proven` for static/type checks
+  - `runtime_proven` for the local Electrobun build artifact containing the copied icon
+- readiness verdict:
+  - product is still not ready until live Telegram-token end-to-end proof passes
+- tranche progress:
+  - `Tranche J: Product Readiness Proof`
+  - `50%` (`1/2` rows)
+- next true executable task:
+  - `Nanotask J.2: Run live Telegram-token end-to-end proof`
+
+## 2026-04-24 - Nanotask J.2
+
+- task: `Nanotask J.2: Implement intelligent hook lifecycle management`
+- status: completed
+- scope:
+  - hook lifecycle state machine
+  - active app-server activity detection
+  - pending full-removal flow
+  - global plus known repo-local hook file handling
+  - product-facing lifecycle status output
+  - no live Telegram-token execution
+  - no signing, notarization, updater, or public distribution work
+- documentation check:
+  - official Codex hooks docs now state that matching hooks from multiple files all run
+  - official Codex hooks docs identify both `~/.codex/hooks.json` and `<repo>/.codex/hooks.json`
+  - official app-server docs expose `thread/loaded/list`, `thread/read` runtime status, and active status notifications
+- strongest contradiction:
+  - previous Stop/Clear behavior only cleaned the global hooks file and could imply complete removal even when repo-local managed hooks or live runtime loading still existed
+- implementation:
+  - added persisted hook lifecycle state to settings:
+    - `hook_removal_pending`
+    - `hook_removal_next_attempt_at`
+    - `hook_lifecycle_status_json`
+  - added machine-readable lifecycle status to the product snapshot:
+    - `requestedAction`
+    - `appliedAction`
+    - `deferredAction`
+    - `remainingRisk`
+    - `nextAutomaticStep`
+    - `objectives.inertNow`
+    - `objectives.removedFromHooksJson`
+    - `objectives.unloadedFromLiveRuntime`
+  - added app-server activity inspection via:
+    - `thread/loaded/list`
+    - `thread/read`
+    - active status detection
+  - changed Stop/Clear to:
+    - inspect app-server activity first
+    - apply `paused + pending` when activity is active or unknown
+    - remove only Loopndroll-managed hooks from global and known repo-local hook files when idle
+    - restart the app-server lane after file removal to materialize runtime unload
+  - added automatic pending retry via setup/polling and a background monitor
+  - updated Settings UI to show the chosen lifecycle path and remaining risk
+  - updated README and progress truth to avoid treating pause as removal or file edits as runtime unload proof
+- proof:
+  - focused Bun tests:
+    - `bun test src/bun/hook-management-product.test.ts src/bun/codex-app-server-client.test.ts`
+    - pass
+    - `10 pass`
+    - `0 fail`
+  - full Bun suite:
+    - `bun test`
+    - pass
+    - `58 pass`
+    - `0 fail`
+  - static proof:
+    - `./node_modules/.bin/oxfmt --check ...`
+    - pass
+    - `./node_modules/.bin/oxlint ... --deny-warnings`
+    - pass
+    - `./node_modules/.bin/tsgo --noEmit -p tsconfig.json`
+    - pass
+  - build proof:
+    - `./node_modules/.bin/vite build`
+    - pass with existing non-blocking chunk-size warning
+    - `./node_modules/.bin/electrobun build`
+    - pass
+- proof level:
+  - `implemented`
+  - `code_proven`
+  - `test_proven`
+  - `runtime_proven` for local renderer/desktop build artifacts
+- remaining explicit debt:
+  - live Telegram-token end-to-end proof remains unproven and still blocks product readiness
+  - only known repo-local hook files from Loopndroll sessions are cleaned; repos never seen by Loopndroll remain outside product scope
+- tranche progress:
+  - `Tranche J: Product Readiness Proof`
+  - `66.7%` (`2/3` rows)
+- next true executable task:
+  - `Nanotask J.3: Run live Telegram-token end-to-end proof`
+
+## 2026-04-24 - Nanotask J.3
+
+- task: `Nanotask J.3: Run live Telegram-token end-to-end proof`
+- status: partially completed; stopped after local runtime defect fix and outbound proof
+- audit verdict on previous row:
+  - `Nanotask J.2` did not drift into Telegram runtime proof
+  - no trim was needed before starting J.3
+- focused defect found during proof:
+  - Loopndroll live state was `stopped`
+  - global `~/.codex/hooks.json` contained no managed hooks
+  - after `Start`, the installed managed hook still failed against the current DB schema:
+    - generated hook SQL still targeted old `session_id`
+    - generated hook SQL still targeted old `title`
+    - current live schema uses `thread_id` and `thread_name`
+- implementation:
+  - added generated-hook schema normalization in `src/bun/managed-hook-script.ts`
+  - preserved Codex inbound payload field `input.session_id`
+  - retargeted generated SQL to `thread_id` and `thread_name`
+  - added regression coverage in `src/bun/managed-hook-script.test.ts`
+  - re-ran `Start` to reinstall the corrected live hook
+- proof:
+  - `bun test src/bun/managed-hook-script.test.ts`
+    - pass
+    - `4 pass`
+    - `0 fail`
+  - `bun test`
+    - pass
+    - `59 pass`
+    - `0 fail`
+  - `./node_modules/.bin/tsgo --noEmit -p tsconfig.json`
+    - pass
+  - direct live Telegram Bot API delivery:
+    - pass
+    - Telegram `message_id=166`
+  - installed managed-hook live delivery:
+    - command path: `Stop -> loopndroll-hook -> Telegram`
+    - pass
+    - Telegram `message_id=168`
+  - live state after proof:
+    - `runtime_state=running`
+    - `hook_removal_pending=0`
+- proof level:
+  - `implemented`
+  - `code_proven`
+  - `test_proven`
+  - `runtime_proven` for outbound Telegram delivery through the installed managed hook
+- remaining explicit debt:
+  - inbound Telegram reply/bridge path is not yet live-proven
+  - full Telegram end-to-end readiness is not claimed until inbound reply is captured and consumed
+- tranche progress:
+  - `Tranche J: Product Readiness Proof`
+  - `66.7%` (`2/3` rows)
+- next true executable task:
+  - `Nanotask J.3b: Prove live Telegram inbound reply through the bridge`
+
+## 2026-04-24 - Nanotask J.3b
+
+- task: `Nanotask J.3b: Prove live Telegram inbound reply through the bridge`
+- status: partially completed; stopped before claiming fresh automatic post-rebuild end-to-end proof
+- audit verdict on previous row:
+  - `Nanotask J.3` did not drift into inbound bridge proof
+  - no trim was needed before starting J.3b
+- focused defect found during proof:
+  - Telegram inbound was not the broken layer
+  - the bridge had consumed and queued an inbound user message for thread `019da4cd-6d70-7203-bd78-d3f52e08ee53`
+  - the app-server wake path failed with `thread-resume-failed`
+  - direct app-server inspection showed the target thread still existed
+  - root cause: app-server asynchronous notifications could arrive between JSON-RPC request and response, and Loopndroll treated the first readable message as the response
+- implementation:
+  - changed the app-server RPC client to ignore messages without the matching response `id`
+  - added regression coverage for app-server startup/status notifications interleaved with `thread/resume` and `turn/start`
+  - extracted a local test transport helper to keep the test file under the configured line limits
+  - rebuilt the local app bundle and reopened Loopndroll so the running app uses the fixed code
+- proof:
+  - focused app-server/Telegram wake tests:
+    - `bun test src/bun/codex-app-server-client.test.ts src/bun/telegram-bridge-passive.test.ts src/bun/passive-simple-wake.test.ts`
+    - pass
+    - `13 pass`
+    - `0 fail`
+  - full Bun suite:
+    - `bun test`
+    - pass
+    - `60 pass`
+    - `0 fail`
+  - static proof:
+    - `./node_modules/.bin/oxfmt --check src electrobun.config.ts vite.config.ts`
+    - pass
+    - `./node_modules/.bin/oxlint src electrobun.config.ts vite.config.ts --deny-warnings`
+    - pass
+    - `./node_modules/.bin/tsgo --noEmit -p tsconfig.json`
+    - pass
+  - runtime proof:
+    - queued Telegram prompt was passed to the fixed app-server wake path
+    - app-server returned `accepted`
+    - produced turn `019dbcb4-dc8a-7b20-b391-e997b23da0ef`
+    - queued prompt count returned to `0`
+  - build/materialization proof:
+    - `./node_modules/.bin/vite build`
+    - pass with existing non-blocking chunk-size warning
+    - `./node_modules/.bin/electrobun build`
+    - pass
+    - rebuilt `Loopndroll-dev.app` reopened
+    - running processes confirmed for launcher and bundled `main.js`
+  - Bot API sanity check:
+    - sanitized `getUpdates` after the stored cursor returned `pendingCount=0`
+- proof level:
+  - `implemented`
+  - `code_proven`
+  - `test_proven`
+  - `runtime_proven` for the queued Telegram inbound prompt waking Codex through app-server
+- remaining explicit debt:
+  - fresh automatic Telegram-to-running-app proof is not captured after the rebuild because there are no pending Bot API updates after the current cursor
+  - do not claim `end_to_end_proven` until a new user Telegram message is observed through the rebuilt running app
+- tranche progress:
+  - `Tranche J: Product Readiness Proof`
+  - `83.3%` (`2.5/3` rows; J.3 inbound wake defect fixed, fresh automatic post-rebuild proof still open)
+- next true executable task:
+  - `Nanotask J.3c: Capture a fresh Telegram inbound message through the rebuilt running app`
+
+## 2026-04-24 - Nanotask J.3c Telegram inbound delivery audit
+
+- task: `Fix Telegram inbound delivery truth for passive/app-server handoff`
+- status: source fixed, rebuilt app reopened; external idle-thread Telegram completion proof still open
+- audit verdict on previous row:
+  - previous passive wake proof overclaimed by treating app-server acceptance as completed work
+  - trim was needed in progress wording because `Working on ...` was not strong enough without fresh thread-active observation and terminal turn status
+- implementation:
+  - preserved exact-target behavior for:
+    - Telegram `reply_to_message` via `telegram_delivery_receipts`
+    - `/reply Cx ...` via explicit session ref
+  - added loose DM target resolution:
+    - if there is no `reply_to_message` and no awaiting session, resolve to the latest prior Telegram notification receipt for the same bot/chat whose session still has an active effective mode
+    - future notification receipts and inactive/opted-out sessions are ignored
+  - changed passive app-server wake truth:
+    - `turn/start` alone no longer counts as accepted wake
+    - `Working on ...` now requires a fresh `thread/read` observation with active thread status after `turn/start`
+  - changed spawned app-server lifecycle:
+    - non-accepted wake closes the transport immediately
+    - accepted wake keeps the transport alive in background until the started `turnId` reaches a terminal turn status
+    - this avoids killing the app-server immediately after starting the turn
+- proof:
+  - focused tests:
+    - `bun test src/bun/codex-app-server-client.test.ts src/bun/passive-simple-wake.test.ts src/bun/telegram-bridge-passive.test.ts src/bun/telegram-bridge-session-store.test.ts`
+    - pass
+    - `19 pass`
+    - `0 fail`
+  - full Bun suite:
+    - `bun test`
+    - pass
+    - `67 pass`
+    - `0 fail`
+  - static proof:
+    - `./node_modules/.bin/oxlint src electrobun.config.ts vite.config.ts --deny-warnings`
+    - pass
+    - `./node_modules/.bin/oxfmt --check src electrobun.config.ts vite.config.ts`
+    - pass
+    - `./node_modules/.bin/tsgo --noEmit -p tsconfig.json`
+    - pass
+  - build/materialization proof:
+    - `./node_modules/.bin/vite build`
+    - pass with existing non-blocking large chunk warning
+    - `./node_modules/.bin/electrobun build`
+    - pass
+    - old Loopndroll app processes closed
+    - rebuilt `Loopndroll-dev.app` reopened
+    - running launcher PID `49632`
+    - running bundled main PID `49674`
+  - runtime delivery probe:
+    - inserted a controlled probe message into C1 through the passive delivery/app-server path
+    - app-server readback showed the probe as a `userMessage` in the target thread
+    - the resulting turn status was `interrupted`, not `completed`
+- proof level:
+  - `implemented`
+  - `code_proven`
+  - `test_proven`
+  - `runtime_proven` for target insertion into the thread
+- explicit non-claims:
+  - completed autonomous Codex execution from Telegram is not claimed
+  - external Telegram Bot API end-to-end proof is not claimed in this row
+  - product v1 ready is not claimed
+- tranche progress:
+  - `Tranche J: Product Readiness Proof`
+  - remains `83.3%` (`2.5/3` rows; inbound targeting/insertion fixed, completed external Telegram execution proof still open)
+- next true executable task:
+  - `Nanotask J.3d: Capture an external Telegram reply into an idle target thread and prove the resulting turn reaches completed status`
+
+## 2026-04-24 - Current Tranche J Status After Passive Wake
+
+- status correction:
+  - later work in this file includes both the watcher singleton detour and the passive wake materialization
+  - the current live state is the passive wake materialized state, not the earlier detour-only state
+- strongest safe truth:
+  - passive notification semantics are live-installed
+  - passive wake-up through app-server is runtime-proven
+  - rebuilt app bundle is open and running
+  - watcher singleton lock is active under the rebuilt app process
+- remaining proof gap:
+  - only an external Telegram Bot API reply after the next real user message remains unproven
+- next true executable task:
+  - `Nanotask J.3d: Capture an external Telegram Bot API reply after the next real user message`
+
+## 2026-04-24 - Nanotask J.3c-passive-hook
+
+- task: `Fix passive preset handling in the generated managed hook`
+- status: completed for hook semantics, passive wake-up, and rebuilt-app materialization; external Bot API reply proof remains waiting on a fresh user reply
+- audit verdict on previous row:
+  - `Detour J.3b-lock` stayed bounded to watcher singleton safety
+  - no trim was needed before returning to passive mode
+- strongest contradiction:
+  - app/UI and Telegram bridge knew about `passive`
+  - generated managed hook still normalized presets without `passive`
+  - as a result, the Stop hook could treat passive as `null`, losing passive notification/footer semantics in the actual hook runtime
+- implementation:
+  - updated managed-hook source generation to preserve `passive` in `normalizeLoopPreset`
+  - added regression coverage that the generated hook contains:
+    - `value === "passive"`
+    - passive notification footer handling
+    - current `thread_id` / `thread_name` schema references
+  - reinstalled the live managed hook through `startLoopndroll()`
+- proof:
+  - focused passive/hook tests:
+    - `bun test src/bun/managed-hook-script.test.ts src/bun/telegram-output.test.ts src/bun/telegram-bridge-passive.test.ts src/bun/passive-simple-wake.test.ts`
+    - pass
+    - `13 pass`
+    - `0 fail`
+  - full Bun suite:
+    - `bun test`
+    - pass
+    - `63 pass`
+    - `0 fail`
+  - static proof:
+    - `./node_modules/.bin/oxlint src electrobun.config.ts vite.config.ts --deny-warnings`
+    - pass
+    - `./node_modules/.bin/oxfmt --check src electrobun.config.ts vite.config.ts`
+    - pass
+    - `./node_modules/.bin/tsgo --noEmit -p tsconfig.json`
+    - pass
+  - live installed-hook inspection:
+    - contains passive preset normalizer
+    - contains passive footer text
+    - contains current schema references
+    - no old `where session_id = ?` reference found
+  - live synthetic Stop proof:
+    - executed installed `loopndroll-hook`
+    - session `C1` is configured as `passive`
+    - hook exited `0`
+    - stdout empty
+    - stderr empty
+    - Telegram receipt advanced to `message_id=174`
+    - watcher status remained inactive
+  - passive wake-up proof:
+    - executed `handlePassiveReplyDelivery()` against the live product DB
+    - used session `C1`
+    - handler returned `Working on`
+    - queue count was `0` before and `0` after, proving the queued one-shot prompt was consumed after app-server acceptance
+    - app-server readback confirmed thread `019da4cd-6d70-7203-bd78-d3f52e08ee53` was readable
+    - latest observed turn after the wake was `019dbcd6-2d6e-79c3-9f55-dabca27d7136`
+  - build/materialization proof:
+    - `./node_modules/.bin/vite build`
+    - pass with existing non-blocking large chunk warning
+    - `./node_modules/.bin/electrobun build`
+    - pass
+    - old Loopndroll app processes were closed
+    - rebuilt `Loopndroll-dev.app` reopened
+    - running launcher and bundled `main.js` processes confirmed
+    - post-relaunch installed hook still contains passive preset normalizer/footer and current schema references
+    - watcher singleton lock exists with the rebuilt app PID
+  - reply observation:
+    - DB cursor did not advance during the observation window
+    - sanitized Bot API `getUpdates` returned `pendingCount=0`
+- proof level:
+  - `implemented`
+  - `code_proven`
+  - `test_proven`
+  - `runtime_proven` for passive Stop notification and wake-up semantics through the installed managed hook plus app-server
+- explicit non-claims:
+  - external Bot API reply-to-passive-notification e2e is not claimed because no fresh Telegram reply was available to consume
+  - release/signing/notarization/updater/public distribution are not part of this row
+- tranche progress:
+  - `Tranche J: Product Readiness Proof`
+  - remains `83.3%` (`2.5/3` rows; passive wake-up fixed, external fresh Bot API reply proof still open)
+- next true executable task:
+  - `Nanotask J.3d: Capture an external Telegram Bot API reply after the next real user message`
+
+## 2026-04-24 - Detour J.3b-lock
+
+- task: `Implement singleton guard for pending hook-removal watcher before any hook/watcher reactivation`
+- status: completed in source and tests; not materialized into a rebuilt running app in this pass
+- audit verdict on previous row:
+  - `Nanotask J.3b` left fresh automatic Telegram proof open
+  - no trim was needed before this detour because the detour is explicitly a safety prerequisite before watcher reactivation
+- implementation:
+  - added `stateDirectoryPath` and `hookRemovalWatchLockPath` to Loopndroll runtime paths
+  - added atomic watcher lock acquisition at `state/hook-removal-watch.lock`
+  - lock payload records:
+    - `pid`
+    - `started_at`
+    - `repo_root`
+    - `hooks_path`
+    - `runtime_state_path`
+  - if an existing lock has a live PID, acquisition returns `watcher already running`
+  - if an existing lock has a dead/invalid PID, acquisition removes the stale lock and starts as the new owner
+  - watcher shutdown cleanup releases the lock on:
+    - `SIGTERM`
+    - `SIGINT`
+    - normal `exit`
+  - pending-removal monitor now uses singleton ownership, timeout scheduling, backoff, and jitter instead of an unconditional fixed `setInterval`
+  - product snapshot and Settings expose watcher active state and PID
+  - README documents the lock behavior and emergency stop commands:
+    - `pkill -TERM -f 'theinvoker-manage-hooks.mjs --action watch-pending-removal'`
+    - `pgrep -fl theinvoker-manage-hooks.mjs`
+- proof:
+  - focused tests:
+    - `bun test src/bun/hook-removal-watch-lock.test.ts src/bun/hook-management-product.test.ts src/bun/managed-hook-script.test.ts`
+    - pass
+    - `8 pass`
+    - `0 fail`
+  - full Bun suite:
+    - `bun test`
+    - pass
+    - `62 pass`
+    - `0 fail`
+  - static proof:
+    - `./node_modules/.bin/oxlint src electrobun.config.ts vite.config.ts --deny-warnings`
+    - pass
+    - `./node_modules/.bin/oxfmt --check src electrobun.config.ts vite.config.ts`
+    - pass
+    - `./node_modules/.bin/tsgo --noEmit -p tsconfig.json`
+    - pass
+- proof level:
+  - `implemented`
+  - `code_proven`
+  - `test_proven`
+- explicit non-claims:
+  - no hook was re-enabled in this pass
+  - no watcher was intentionally started or materialized by rebuilding/reopening the app in this pass
+  - no fresh Telegram automatic post-rebuild proof was attempted in this detour
+- tranche progress:
+  - `Tranche J: Product Readiness Proof`
+  - remains `83.3%` (`2.5/3` rows; safety detour complete, final fresh Telegram proof still open)
+- next true executable task:
+  - `Nanotask J.3c: Capture a fresh Telegram inbound message through the rebuilt running app`
+
+## 2026-04-24 - Nanotask J.3d app-server passive keepalive/output
+
+- task: `Fix passive Telegram delivery so app-server wake keeps the transport alive and streams output back to Telegram`
+- status: completed in source, tests, build, and local reopened app
+- source audit:
+  - official OpenAI Codex app-server docs confirm the supported flow is `initialize` / `initialized`, `thread/resume`, `turn/start`, streaming notifications, then `turn/completed`
+  - local Codex `0.124.0` exposes `stdio://`, `ws://IP:PORT`, and `off`; it does not expose the newer `unix://`/proxy control surface in this installed binary
+  - current robust path is therefore a Loopndroll-owned `stdio://` app-server plus persisted `threadId` reconnect after crash/restart
+- implementation:
+  - passive wake now starts a Loopndroll-owned app-server transport, resumes the target thread, starts a turn, and keeps the transport alive until terminal turn status
+  - `Working on ...` is only returned after the app-server wake reports an active thread; unavailable/failed wake remains `Received ...` and preserves the queued prompt
+  - keepalive forwards app-server notifications to a callback
+  - passive app-server `agentMessage` completions are rendered through the existing Telegram output formatter and sent to the thread's Telegram notification targets
+  - Telegram delivery receipts are recorded for passive app-server output so reply-to targeting remains tied to the correct thread
+  - previous interrupted-turn contradiction was caused by closing the spawned app-server transport too early
+- runtime proof:
+  - managed app-server wake into C1 accepted turn `019dbcfa-cc56-70c1-b71c-aa9d56b34df1`
+  - keepalive observed the turn reach `completed` with final idle thread status
+- proof:
+  - focused tests: `bun test src/bun/passive-simple-wake.test.ts src/bun/telegram-bridge-passive.test.ts src/bun/codex-app-server-client.test.ts` -> pass (`16 pass`, `0 fail`)
+  - full Bun suite: `bun test` -> pass (`68 pass`, `0 fail`)
+  - format: `bunx oxfmt --check ...` -> pass
+  - lint: `bunx oxlint ...` -> pass
+  - typecheck: `bunx tsgo --noEmit` -> pass
+  - renderer build: `bunx vite build` -> pass with existing large chunk warning
+  - desktop build: `bunx electrobun build` -> pass; icon copied into bundle
+  - reopened local app: launcher PID `63225`, main PID `63283`
+- proof level:
+  - `implemented`
+  - `code_proven`
+  - `test_proven`
+  - `runtime_proven` for app-server-managed completed passive turn
+- explicit non-claims:
+  - fresh external Telegram-to-Codex-to-Telegram proof through the rebuilt app is not claimed yet
+  - `unix://`/proxy app-server discovery is not implemented because the installed Codex binary does not expose it
+  - release/signing/notarization/updater/public distribution are not part of this row
+- tranche progress:
+  - `Tranche J: Product Readiness Proof`
+  - now `91.7%` (`2.75/3` rows; app-server completed execution fixed, external Telegram end-to-end proof still open)
+- next true executable task:
+  - `Nanotask J.3e: Capture a fresh external Telegram message through the rebuilt app and prove Telegram-to-Codex-to-Telegram output`
+
+### 2026-04-24 - Nanotask J.3d crash-safety correction
+
+- correction:
+  - one-shot passive Telegram prompt state is no longer deleted immediately after `turn/start`
+  - prompt state is deleted only after keepalive observes `turn/completed`
+  - if app-server, bridge, app, or host restarts mid-turn, the operator intent remains available for retry instead of disappearing silently
+- proof:
+  - focused tests: `bun test src/bun/passive-simple-wake.test.ts src/bun/telegram-bridge-passive.test.ts src/bun/codex-app-server-client.test.ts` -> pass (`16 pass`, `0 fail`)
+  - full Bun suite: `bun test` -> pass (`68 pass`, `0 fail`)
+  - format: `bunx oxfmt --check ...` -> pass
+  - lint: `bunx oxlint ...` -> pass
+  - typecheck: `bunx tsgo --noEmit` -> pass
+  - renderer build: `bunx vite build` -> pass with existing large chunk warning
+  - desktop build: `bunx electrobun build` -> pass; icon copied into bundle
+  - reopened local app: launcher PID `65547`, main PID `65612`
+- proof level:
+  - `implemented`
+  - `code_proven`
+  - `test_proven`
+- explicit non-claims:
+  - crash/restart retry is policy-safe at the persisted prompt boundary, but an actual mid-turn crash/restart drill has not been run yet
+  - fresh external Telegram-to-Codex-to-Telegram proof through the rebuilt app is still open
+
+### 2026-04-24 - Nanotask J.3e active-thread steering correction
+
+- defect observed:
+  - fresh Telegram message `tee` reached C1 through Telegram/app-server
+  - C1 showed a completed turn with only `userMessage` and no `agentMessage`
+  - this proved polling and target resolution were working, but active-thread delivery was using the wrong app-server action
+- correction:
+  - after `thread/resume`, Loopndroll now reads the thread with turns
+  - if the thread is `active`, it finds the current `inProgress` turn and uses `turn/steer` with `expectedTurnId`
+  - if the thread is idle/notLoaded, it uses `turn/start`
+  - prompt cleanup still waits for completed turn plus delivered agent output
+- runtime proof:
+  - app-server steer probe into active C1 accepted turn `019dbd0e-904e-7e92-8d67-f03f99f49f9c`
+  - notification stream produced final `agentMessage` text `STEER OK`
+  - keepalive observed `lastTurnStatus=completed` and `lastThreadStatusType=idle`
+- proof:
+  - focused tests: `bun test src/bun/codex-app-server-client.test.ts src/bun/passive-simple-wake.test.ts src/bun/telegram-bridge-passive.test.ts` -> pass (`17 pass`, `0 fail`)
+  - full Bun suite: `bun test` -> pass (`69 pass`, `0 fail`)
+  - typecheck: `bunx tsgo --noEmit` -> pass
+  - renderer build: `bunx vite build` -> pass with existing large chunk warning
+  - desktop build: `bunx electrobun build` -> pass; icon copied into bundle
+  - reopened local app: launcher PID `70574`, main PID `70600`
+- proof level:
+  - `implemented`
+  - `code_proven`
+  - `test_proven`
+  - `runtime_proven` for active-thread `turn/steer`
+- explicit non-claims:
+  - fresh external Telegram-to-Codex-to-Telegram proof through the rebuilt app still requires a new Telegram message after this rebuild
+  - fully synchronized attachment to the private Codex Desktop app-server is not claimed in local Codex `0.124.0`; current path is a Loopndroll-owned app-server using the same persisted thread identity
+
+### 2026-04-24 - Nanotask J.3e passive/global targeting trim
+
+- task: `Keep loose Telegram message targeting bounded to passive mode while preserving global passive inheritance`
+- status: completed in source and focused proof
+- audit verdict:
+  - drift found before this pass: the loose-message receipt fallback accepted any active preset family, including `infinite`, `await-reply`, completion checks, and max-turn modes
+  - that was wider than the current requested scope of passive mode only
+- correction:
+  - renamed the receipt fallback helper to `findLatestPassiveTelegramReceiptSessionIdBeforeMessage`
+  - limited loose Telegram message receipt fallback to sessions with `preset = 'passive'`
+  - preserved global inheritance when `preset is null`, `preset_overridden = 0`, and `global_preset = 'passive'`
+  - preserved explicit reply-to routing and awaiting-reply targeting outside this passive fallback
+  - updated the bridge debug miss reason to `no-waiting-or-recent-passive-session`
+- proof:
+  - focused tests:
+    - `bun test src/bun/codex-app-server-client.test.ts src/bun/passive-simple-wake.test.ts src/bun/telegram-bridge-passive.test.ts src/bun/telegram-bridge-session-store.test.ts`
+    - pass
+    - `22 pass`
+    - `0 fail`
+  - focused lint:
+    - `node_modules/.bin/oxlint src/bun/codex-app-server-client.ts src/bun/codex-app-server-client.test.ts src/bun/passive-simple-wake.ts src/bun/passive-simple-wake.test.ts src/bun/telegram-bridge.ts src/bun/telegram-bridge-session-store.ts src/bun/telegram-bridge-session-store.test.ts src/bun/telegram-bridge-passive.test.ts --deny-warnings`
+    - first run failed only because the expanded test `describe` exceeded the repository max-lines-per-function rule
+    - split the test block without changing behavior
+    - rerun pass
+- proof level:
+  - `implemented`
+  - `code_proven`
+  - `test_proven`
+- explicit non-claims:
+  - no fresh external Telegram Bot API end-to-end proof was captured in this pass
+  - no runtime app rebuild/relaunch was performed in this pass
+  - no hook behavior was changed in this pass
+  - non-passive global loose-message behavior is intentionally not implemented yet
+- tranche progress:
+  - `Tranche J: Product Readiness Proof`
+  - now `96.7%` (`2.9/3` rows; passive/global targeting corrected, external Telegram end-to-end proof still open)
+- next true executable task:
+  - `Capture a fresh external Telegram Bot API message through the rebuilt app and prove Telegram-to-Codex-to-Telegram output`

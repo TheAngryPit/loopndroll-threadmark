@@ -151,6 +151,8 @@ export function buildTelegramHelpText() {
     "/mode C22 await - Set chat C22 to Await Reply",
     "/mode C22 passive - Set chat C22 to Passive",
     "/mode C22 off - Stop chat C22",
+    "/failsafe C22 - Immediately disable passive/control for chat C22 and clear its pending prompts",
+    "/failsafe all - Immediately disable the global mode, every chat mode, and all pending prompts",
     "",
     "Reply behavior:",
     "Reply directly to a Telegram notification to target that chat.",
@@ -169,6 +171,8 @@ export function buildTelegramHelpText() {
     "/reply C22 fix the failing test",
     "/mode global await",
     "/mode C22 passive",
+    "/failsafe C22",
+    "/failsafe all",
     "/mode C22 off",
   ].join("\n");
 }

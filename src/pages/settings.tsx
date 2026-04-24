@@ -128,6 +128,8 @@ function SettingsContent({
           />
           <HookRegistrationSection
             hasResolvedHookState={model.hasResolvedHookState}
+            hookLifecycle={model.hookLifecycle}
+            hookRemovalWatcher={model.hookRemovalWatcher}
             hooksDetected={model.hooksDetected}
             runtimeState={model.runtimeState}
             onClearHooks={() => {

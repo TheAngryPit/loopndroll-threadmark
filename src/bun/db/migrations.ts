@@ -931,6 +931,27 @@ export const appMigrations: AppMigration[] = [
       `alter table session_awaiting_replies rename column session_id to thread_id`,
     ],
   },
+  {
+    id: 19,
+    name: "orphaned_refresh_miss_count",
+    statements: [
+      `alter table sessions add column orphaned_refresh_miss_count integer not null default 0 check (orphaned_refresh_miss_count >= 0)`,
+      `update sessions
+        set orphaned_refresh_miss_count = 0
+        where orphaned_refresh_miss_count is null
+           or orphaned_refresh_miss_count < 0`,
+    ],
+  },
+  {
+    id: 20,
+    name: "hook_lifecycle_status",
+    statements: [
+      `alter table settings add column hook_removal_pending integer not null default 0 check (hook_removal_pending in (0, 1))`,
+      `alter table settings add column hook_removal_next_attempt_at text`,
+      `alter table settings add column hook_lifecycle_status_json text`,
+      `update settings set hook_removal_pending = 0 where hook_removal_pending is null`,
+    ],
+  },
 ];
 
 export function applyAppMigrations(

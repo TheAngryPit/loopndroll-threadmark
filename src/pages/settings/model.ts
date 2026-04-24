@@ -509,6 +509,8 @@ function createSettingsRouteModelResult(args: {
     editingCompletionCheckId: args.dialogState.editingCompletionCheckId,
     editingNotificationId: args.dialogState.editingNotificationId,
     hasResolvedHookState: !args.loopndrollState.isLoading && args.loopndrollState.snapshot !== null,
+    hookLifecycle: args.loopndrollState.snapshot?.hookLifecycle ?? null,
+    hookRemovalWatcher: args.loopndrollState.snapshot?.health.hookRemovalWatcher ?? null,
     hooksDetected: args.loopndrollState.snapshot?.health.registered ?? false,
     runtimeState: args.loopndrollState.snapshot?.runtimeState ?? "running",
     isCompletionCheckDialogOpen: args.dialogState.isCompletionCheckDialogOpen,

@@ -1,5 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import { collectCanonicalThreadNameUpdates } from "./thread-name-refresh";
+import {
+  ORPHANED_THREAD_PRUNE_RELAUNCH_LIMIT,
+  collectCanonicalThreadNameUpdates,
+  collectOrphanedThreadArtifactActions,
+} from "./thread-name-refresh";
 
 describe("collectCanonicalThreadNameUpdates", () => {
   test("refreshes stale stored names from canonical discovery results", () => {
@@ -86,5 +90,71 @@ describe("collectCanonicalThreadNameUpdates", () => {
     );
 
     expect(updates).toEqual([]);
+  });
+});
+
+describe("collectOrphanedThreadArtifactActions", () => {
+  test("increments hidden orphan artifacts and resets recovered rows", () => {
+    const actions = collectOrphanedThreadArtifactActions(
+      [
+        {
+          threadId: "thr_hidden",
+          cwd: "/tmp/project",
+          threadName: "You are a helpful assistant.",
+          orphanedRefreshMissCount: 1,
+          transcriptPath: null,
+        },
+        {
+          threadId: "thr_recovered",
+          cwd: "/tmp/project",
+          threadName: "Build freelancer pricing engine",
+          orphanedRefreshMissCount: 2,
+          transcriptPath: null,
+        },
+      ],
+      [
+        {
+          threadId: "thr_recovered",
+          threadName: "Build freelancer pricing engine",
+          cwd: "/tmp/project",
+        },
+      ],
+      [],
+    );
+
+    expect(actions).toEqual([
+      {
+        type: "increment",
+        threadId: "thr_hidden",
+        nextMissCount: 2,
+      },
+      {
+        type: "reset",
+        threadId: "thr_recovered",
+      },
+    ]);
+  });
+
+  test("hard deletes the artifact after the prune limit", () => {
+    const actions = collectOrphanedThreadArtifactActions(
+      [
+        {
+          threadId: "thr_hidden",
+          cwd: "/tmp/project",
+          threadName: "You are a helpful assistant.",
+          orphanedRefreshMissCount: ORPHANED_THREAD_PRUNE_RELAUNCH_LIMIT - 1,
+          transcriptPath: null,
+        },
+      ],
+      [],
+      [],
+    );
+
+    expect(actions).toEqual([
+      {
+        type: "delete",
+        threadId: "thr_hidden",
+      },
+    ]);
   });
 });

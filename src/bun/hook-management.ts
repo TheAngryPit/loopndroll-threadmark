@@ -1,9 +1,26 @@
 import { spawn } from "node:child_process";
 import { chmod, copyFile, readFile, stat, writeFile } from "node:fs/promises";
+import { join } from "node:path";
+import type { Database } from "bun:sqlite";
 import { eq } from "drizzle-orm";
-import type { LoopndrollSnapshot } from "../shared/app-rpc";
+import type {
+  HookLifecycleRequestedAction,
+  HookLifecycleStatus,
+  LoopndrollSnapshot,
+} from "../shared/app-rpc";
+import {
+  createSpawnedCodexAppServerTransport,
+  inspectCodexRuntimeActivity,
+  type CodexRuntimeActivityInspection,
+} from "./codex-app-server-client";
 import { getLoopndrollDatabase } from "./db/client";
 import { settings } from "./db/schema";
+import {
+  acquireHookRemovalWatchLock,
+  getHookRemovalWatcherStatus,
+  releaseHookRemovalWatchLock,
+  releaseHookRemovalWatchLockSync,
+} from "./hook-removal-watch-lock";
 import { buildManagedHookScript } from "./managed-hook-script";
 import {
   type HookMatcherGroup,
@@ -19,13 +36,55 @@ import {
   getLoopndrollPaths,
   getSettingsRow,
   normalizeLoopndrollRuntimeState,
+  nowIsoString,
   readSnapshotFromDatabase,
 } from "./loopndroll-core";
 import { refreshCanonicalThreadNames } from "./thread-name-refresh";
 
-async function loadHooksDocument(paths: LoopndrollPaths) {
+const PENDING_HOOK_REMOVAL_RECHECK_MS = 30_000;
+const PENDING_HOOK_REMOVAL_RECHECK_MAX_MS = 5 * 60_000;
+const PENDING_HOOK_REMOVAL_JITTER_MS = 2_000;
+
+type HookFileTarget = {
+  path: string;
+  scope: "global" | "repo-local";
+};
+
+type ManagedHookRemovalResult = {
+  inspectedPaths: string[];
+  changedPaths: string[];
+  managedHookCountBefore: number;
+};
+
+export function buildHookFileTargets(
+  codexHooksPath: string,
+  repoCwds: readonly string[],
+): HookFileTarget[] {
+  const targets = new Map<string, HookFileTarget>();
+  targets.set(codexHooksPath, {
+    path: codexHooksPath,
+    scope: "global",
+  });
+
+  for (const repoCwd of repoCwds) {
+    const cwd = repoCwd.trim();
+    if (cwd.length === 0) {
+      continue;
+    }
+
+    const hookPath = join(cwd, ".codex", "hooks.json");
+    targets.set(hookPath, {
+      path: hookPath,
+      scope: "repo-local",
+    });
+  }
+
+  return [...targets.values()];
+}
+
+async function loadHooksDocumentAtPath(path: string) {
   try {
-    const raw = await readFile(paths.codexHooksPath, "utf8");
+    const raw = await readFile(path, "utf8");
     return JSON.parse(raw) as HooksDocument;
   } catch (error) {
     if (
@@ -37,15 +96,19 @@ async function loadHooksDocument(paths: LoopndrollPaths) {
       return { hooks: {} };
     }
 
-    const backupPath = `${paths.codexHooksPath}.corrupt.${Date.now()}`;
+    const backupPath = `${path}.corrupt.${Date.now()}`;
     try {
-      await copyFile(paths.codexHooksPath, backupPath);
+      await copyFile(path, backupPath);
     } catch {
       // Ignore backup failures and continue with a clean hooks file.
     }
 
     return { hooks: {} };
   }
+}
+
+async function loadHooksDocument(paths: LoopndrollPaths) {
+  return loadHooksDocumentAtPath(paths.codexHooksPath);
 }
 
 function ensureCodexHooksFeature(configText: string) {
@@ -103,6 +166,17 @@ function isManagedHookCommand(command: string | undefined) {
   return typeof command === "string" && command.includes(MANAGED_HOOK_MARKER);
 }
 
+function countManagedHooks(hooksDocument: HooksDocument) {
+  let count = 0;
+  for (const groups of Object.values(hooksDocument.hooks ?? {})) {
+    for (const group of groups) {
+      count += (group.hooks ?? []).filter((hook) => isManagedHookCommand(hook.command)).length;
+    }
+  }
+
+  return count;
+}
+
 function removeManagedHooks(hooksDocument: HooksDocument) {
   const nextHooks: Record<string, HookMatcherGroup[]> = {};
 
@@ -124,6 +198,21 @@ function removeManagedHooks(hooksDocument: HooksDocument) {
   }
 
   hooksDocument.hooks = nextHooks;
+}
+
+function getHookFileTargets(paths: LoopndrollPaths, sqlite: Database): HookFileTarget[] {
+  const rows = sqlite
+    .query("select distinct cwd from sessions where cwd is not null and trim(cwd) != ''")
+    .all() as Array<{ cwd: string }>;
+  return buildHookFileTargets(
+    paths.codexHooksPath,
+    rows.flatMap((row) => (typeof row.cwd === "string" ? [row.cwd] : [])),
+  );
+}
+
+async function writeHooksDocument(path: string, hooksDocument: HooksDocument) {
+  await ensureDirectory(join(path, ".."));
+  await writeFile(path, `${JSON.stringify(hooksDocument, null, 2)}\n`, "utf8");
 }
 
 function upsertManagedHooks(paths: LoopndrollPaths, hooksDocument: HooksDocument) {
@@ -192,48 +281,73 @@ async function ensureManagedHookScript(paths: LoopndrollPaths) {
 async function computeHealth(paths: LoopndrollPaths) {
   const issues: string[] = [];
   const configContents = await readFile(paths.codexConfigPath, "utf8").catch(() => null);
-  const hooksDocument = await loadHooksDocument(paths);
+  const { client } = getLoopndrollDatabase(paths.databasePath);
+  const hookTargets = getHookFileTargets(paths, client);
   const runtimeState = normalizeLoopndrollRuntimeState(getSettingsRow().runtimeState);
   const scriptExists = await stat(paths.managedHookPath)
     .then(() => true)
     .catch(() => false);
-  const hookEvents = hooksDocument.hooks ?? {};
-  const hasManagedSessionStart = (hookEvents.SessionStart ?? []).some((group) =>
-    (group.hooks ?? []).some((hook) => isManagedHookCommand(hook.command)),
-  );
-  const hasManagedStop = (hookEvents.Stop ?? []).some((group) =>
-    (group.hooks ?? []).some((hook) => isManagedHookCommand(hook.command)),
-  );
-  const hasManagedUserPromptSubmit = (hookEvents.UserPromptSubmit ?? []).some((group) =>
-    (group.hooks ?? []).some((hook) => isManagedHookCommand(hook.command)),
-  );
+  let hasManagedSessionStart = false;
+  let hasManagedStop = false;
+  let hasManagedUserPromptSubmit = false;
+  const managedHookPaths: string[] = [];
 
-  if (runtimeState === "stopped") {
-    return {
-      registered: false,
-      issues,
-    };
+  for (const target of hookTargets) {
+    const exists = await stat(target.path)
+      .then(() => true)
+      .catch(() => false);
+    if (!exists) {
+      continue;
+    }
+
+    const hooksDocument = await loadHooksDocumentAtPath(target.path);
+    const hookEvents = hooksDocument.hooks ?? {};
+    const targetHasSessionStart = (hookEvents.SessionStart ?? []).some((group) =>
+      (group.hooks ?? []).some((hook) => isManagedHookCommand(hook.command)),
+    );
+    const targetHasStop = (hookEvents.Stop ?? []).some((group) =>
+      (group.hooks ?? []).some((hook) => isManagedHookCommand(hook.command)),
+    );
+    const targetHasUserPromptSubmit = (hookEvents.UserPromptSubmit ?? []).some((group) =>
+      (group.hooks ?? []).some((hook) => isManagedHookCommand(hook.command)),
+    );
+
+    if (targetHasSessionStart || targetHasStop || targetHasUserPromptSubmit) {
+      managedHookPaths.push(target.path);
+    }
+
+    hasManagedSessionStart = hasManagedSessionStart || targetHasSessionStart;
+    hasManagedStop = hasManagedStop || targetHasStop;
+    hasManagedUserPromptSubmit = hasManagedUserPromptSubmit || targetHasUserPromptSubmit;
   }
 
-  if (!configContents || !/\bcodex_hooks\s*=\s*true\b/.test(configContents)) {
+  if (runtimeState === "stopped" && managedHookPaths.length > 0) {
+    issues.push("Managed hook entries still exist after stopped state.");
+  }
+
+  if (
+    runtimeState !== "stopped" &&
+    (!configContents || !/\bcodex_hooks\s*=\s*true\b/.test(configContents))
+  ) {
     issues.push("Codex hooks are not enabled in ~/.codex/config.toml.");
   }
-  if (!hasManagedSessionStart) {
+  if (runtimeState !== "stopped" && !hasManagedSessionStart) {
     issues.push("Managed SessionStart hook is not registered.");
   }
-  if (!hasManagedStop) {
+  if (runtimeState !== "stopped" && !hasManagedStop) {
     issues.push("Managed Stop hook is not registered.");
   }
-  if (!hasManagedUserPromptSubmit) {
+  if (runtimeState !== "stopped" && !hasManagedUserPromptSubmit) {
     issues.push("Managed UserPromptSubmit hook is not registered.");
   }
-  if (!scriptExists) {
+  if (runtimeState !== "stopped" && !scriptExists) {
     issues.push("Managed hook executable is missing.");
   }
 
   return {
-    registered: issues.length === 0,
+    registered: managedHookPaths.length > 0,
     issues,
+    hookRemovalWatcher: await getHookRemovalWatcherStatus(paths),
   };
 }
 
@@ -254,15 +368,290 @@ async function ensureRegistered(paths: LoopndrollPaths) {
   });
 }
 
-async function clearManagedHookRegistration(paths: LoopndrollPaths) {
-  const hooksDocument = await loadHooksDocument(paths);
-  removeManagedHooks(hooksDocument);
-  await writeFile(paths.codexHooksPath, `${JSON.stringify(hooksDocument, null, 2)}\n`, "utf8");
+async function clearManagedHookRegistration(
+  paths: LoopndrollPaths,
+): Promise<ManagedHookRemovalResult> {
+  const { client } = getLoopndrollDatabase(paths.databasePath);
+  const targets = getHookFileTargets(paths, client);
+  const inspectedPaths: string[] = [];
+  const changedPaths: string[] = [];
+  let managedHookCountBefore = 0;
+
+  for (const target of targets) {
+    const exists = await stat(target.path)
+      .then(() => true)
+      .catch(() => false);
+    if (!exists && target.scope === "repo-local") {
+      continue;
+    }
+
+    inspectedPaths.push(target.path);
+    const hooksDocument = await loadHooksDocumentAtPath(target.path);
+    const before = countManagedHooks(hooksDocument);
+    managedHookCountBefore += before;
+    removeManagedHooks(hooksDocument);
+
+    if (before > 0 || target.scope === "global") {
+      await writeHooksDocument(target.path, hooksDocument);
+      changedPaths.push(target.path);
+    }
+  }
+
+  return {
+    inspectedPaths,
+    changedPaths,
+    managedHookCountBefore,
+  };
 }
 
 function setRuntimeState(value: "running" | "paused" | "stopped") {
   const { db } = getLoopndrollDatabase(getLoopndrollPaths().databasePath);
   db.update(settings).set({ runtimeState: value }).where(eq(settings.id, 1)).run();
+}
+
+function buildHookLifecycleStatus(
+  status: Omit<HookLifecycleStatus, "checkedAt"> & { checkedAt?: string | null },
+): HookLifecycleStatus {
+  return {
+    ...status,
+    checkedAt: status.checkedAt ?? nowIsoString(),
+  };
+}
+
+function persistHookLifecycleStatus(status: HookLifecycleStatus) {
+  const { db } = getLoopndrollDatabase(getLoopndrollPaths().databasePath);
+  db.update(settings)
+    .set({
+      hookLifecycleStatusJson: JSON.stringify(status),
+      hookRemovalPending: status.pending,
+      hookRemovalNextAttemptAt: status.pending
+        ? new Date(Date.now() + PENDING_HOOK_REMOVAL_RECHECK_MS).toISOString()
+        : null,
+    })
+    .where(eq(settings.id, 1))
+    .run();
+}
+
+function setHookLifecycleStatus(status: HookLifecycleStatus) {
+  persistHookLifecycleStatus(status);
+  return status;
+}
+
+function buildSoftPauseStatus(
+  requestedAction: HookLifecycleRequestedAction,
+  inspection: CodexRuntimeActivityInspection,
+): HookLifecycleStatus {
+  const remainingRisk =
+    inspection.status === "active" ? "active-processes-detected" : "activity-unknown";
+
+  return buildHookLifecycleStatus({
+    requestedAction,
+    appliedAction: "soft-pause",
+    deferredAction: "remove-managed-hooks-and-unload-runtime",
+    remainingRisk,
+    nextAutomaticStep:
+      "Recheck Codex runtime activity; when idle, remove managed hooks and restart app-server.",
+    message:
+      inspection.status === "active"
+        ? "soft pause applied because active processes were detected"
+        : "full removal deferred until system is idle",
+    pending: true,
+    objectives: {
+      inertNow: true,
+      removedFromHooksJson: false,
+      unloadedFromLiveRuntime: false,
+    },
+  });
+}
+
+async function inspectRuntimeActivity(): Promise<CodexRuntimeActivityInspection> {
+  let transport = null;
+  try {
+    transport = await createSpawnedCodexAppServerTransport();
+    return await inspectCodexRuntimeActivity(transport);
+  } catch (error) {
+    return {
+      status: "unknown",
+      loadedThreadIds: [],
+      activeThreadIds: [],
+      reason: error instanceof Error ? error.message : String(error),
+    };
+  } finally {
+    await transport?.close().catch(() => {});
+  }
+}
+
+async function restartAppServerForHookUnload() {
+  const inspection = await inspectRuntimeActivity();
+  return inspection.status !== "unknown";
+}
+
+async function completeManagedHookRemoval(
+  requestedAction: HookLifecycleRequestedAction,
+  paths: LoopndrollPaths,
+) {
+  const removal = await clearManagedHookRegistration(paths);
+  const unloaded = await restartAppServerForHookUnload();
+  const status = buildHookLifecycleStatus({
+    requestedAction,
+    appliedAction: unloaded ? "full-removal" : "full-removal-deferred",
+    deferredAction: unloaded ? "none" : "remove-managed-hooks-and-unload-runtime",
+    remainingRisk: unloaded ? "none" : "runtime-unload-unproven",
+    nextAutomaticStep: unloaded
+      ? null
+      : "Retry app-server restart when runtime activity is known safe.",
+    message: unloaded
+      ? "full removal completed immediately; runtime unload required app-server restart"
+      : "managed hooks were removed from hooks.json but runtime unload is still unproven",
+    pending: !unloaded,
+    objectives: {
+      inertNow: true,
+      removedFromHooksJson: true,
+      unloadedFromLiveRuntime: unloaded,
+    },
+  });
+
+  const { db } = getLoopndrollDatabase(paths.databasePath);
+  db.update(settings)
+    .set({
+      hooksAutoRegistration: false,
+      runtimeState: unloaded ? "stopped" : "paused",
+    })
+    .where(eq(settings.id, 1))
+    .run();
+
+  await appendHookDebugLog(paths, {
+    type: "setup",
+    action: "managed-hook-full-removal",
+    requestedAction,
+    inspectedPaths: removal.inspectedPaths,
+    changedPaths: removal.changedPaths,
+    managedHookCountBefore: removal.managedHookCountBefore,
+    runtimeUnloadRestartedAppServer: unloaded,
+  });
+
+  return setHookLifecycleStatus(status);
+}
+
+async function applyIntelligentManagedHookRemoval(requestedAction: HookLifecycleRequestedAction) {
+  const paths = getLoopndrollPaths();
+  const inspection = await inspectRuntimeActivity();
+
+  if (inspection.status !== "idle") {
+    setRuntimeState("paused");
+    const status = setHookLifecycleStatus(buildSoftPauseStatus(requestedAction, inspection));
+    await appendHookDebugLog(paths, {
+      type: "setup",
+      action: "managed-hook-removal-deferred",
+      requestedAction,
+      inspection,
+    });
+    return status;
+  }
+
+  return completeManagedHookRemoval(requestedAction, paths);
+}
+
+export async function completePendingHookRemovalIfSafe() {
+  const settingsRow = getSettingsRow();
+  if (!settingsRow.hookRemovalPending) {
+    return false;
+  }
+
+  const nextAttemptAt = settingsRow.hookRemovalNextAttemptAt
+    ? Date.parse(settingsRow.hookRemovalNextAttemptAt)
+    : 0;
+  if (Number.isFinite(nextAttemptAt) && nextAttemptAt > Date.now()) {
+    return false;
+  }
+
+  await applyIntelligentManagedHookRemoval("stop");
+  return true;
+}
+
+let pendingHookRemovalMonitorStarted = false;
+let pendingHookRemovalMonitorTimer: ReturnType<typeof setTimeout> | null = null;
+let pendingHookRemovalMonitorBackoffMs = PENDING_HOOK_REMOVAL_RECHECK_MS;
+let pendingHookRemovalMonitorCleanupRegistered = false;
+
+function withPendingHookRemovalJitter(delayMs: number) {
+  return delayMs + Math.floor(Math.random() * PENDING_HOOK_REMOVAL_JITTER_MS);
+}
+
+function registerHookRemovalMonitorCleanup(paths: LoopndrollPaths) {
+  if (pendingHookRemovalMonitorCleanupRegistered) {
+    return;
+  }
+
+  pendingHookRemovalMonitorCleanupRegistered = true;
+  const cleanupAndExit = () => {
+    releaseHookRemovalWatchLockSync(paths);
+    process.exit(0);
+  };
+  process.once("SIGTERM", cleanupAndExit);
+  process.once("SIGINT", cleanupAndExit);
+  process.once("exit", () => {
+    releaseHookRemovalWatchLockSync(paths);
+  });
+}
+
+function schedulePendingHookRemovalMonitor(paths: LoopndrollPaths) {
+  pendingHookRemovalMonitorTimer = setTimeout(() => {
+    void runPendingHookRemovalMonitorTick(paths);
+  }, withPendingHookRemovalJitter(pendingHookRemovalMonitorBackoffMs));
+}
+
+async function runPendingHookRemovalMonitorTick(paths: LoopndrollPaths) {
+  try {
+    const didRun = await completePendingHookRemovalIfSafe();
+    pendingHookRemovalMonitorBackoffMs = didRun
+      ? PENDING_HOOK_REMOVAL_RECHECK_MS
+      : Math.min(
+          Math.floor(pendingHookRemovalMonitorBackoffMs * 1.5),
+          PENDING_HOOK_REMOVAL_RECHECK_MAX_MS,
+        );
+  } catch (error) {
+    pendingHookRemovalMonitorBackoffMs = Math.min(
+      pendingHookRemovalMonitorBackoffMs * 2,
+      PENDING_HOOK_REMOVAL_RECHECK_MAX_MS,
+    );
+    await appendHookDebugLog(paths, {
+      type: "setup",
+      action: "pending-hook-removal-recheck-failed",
+      error: error instanceof Error ? error.message : String(error),
+    });
+  } finally {
+    if (pendingHookRemovalMonitorStarted) {
+      schedulePendingHookRemovalMonitor(paths);
+    }
+  }
+}
+
+export async function startHookRemovalPendingMonitor() {
+  if (pendingHookRemovalMonitorStarted) {
+    return "watcher already running";
+  }
+
+  const paths = getLoopndrollPaths();
+  const lock = await acquireHookRemovalWatchLock(paths);
+  if (lock.status === "already-running") {
+    console.log(lock.message);
+    return lock.message;
+  }
+
+  pendingHookRemovalMonitorStarted = true;
+  registerHookRemovalMonitorCleanup(paths);
+  schedulePendingHookRemovalMonitor(paths);
+  return lock.message;
+}
+
+export async function stopHookRemovalPendingMonitorForEmergency() {
+  if (pendingHookRemovalMonitorTimer) {
+    clearTimeout(pendingHookRemovalMonitorTimer);
+    pendingHookRemovalMonitorTimer = null;
+  }
+  pendingHookRemovalMonitorStarted = false;
+  return releaseHookRemovalWatchLock(getLoopndrollPaths());
 }
 
 export function buildLoopndrollSetupSnapshot(
@@ -296,12 +685,27 @@ export async function ensureLoopndrollSetup() {
   }
 
   try {
-    const refreshedCount = await refreshCanonicalThreadNames(client);
-    if (refreshedCount > 0) {
+    await completePendingHookRemovalIfSafe();
+  } catch (error) {
+    await appendHookDebugLog(paths, {
+      type: "setup",
+      action: "pending-hook-removal-recheck-failed",
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+
+  try {
+    const refreshResult = await refreshCanonicalThreadNames(client);
+    if (
+      refreshResult.refreshedCount > 0 ||
+      refreshResult.orphanedMissCountUpdated > 0 ||
+      refreshResult.prunedCount > 0 ||
+      refreshResult.resetCount > 0
+    ) {
       await appendHookDebugLog(paths, {
         type: "setup",
         action: "refresh-canonical-thread-names",
-        refreshedCount,
+        ...refreshResult,
       });
     }
   } catch (error) {
@@ -318,6 +722,7 @@ export async function ensureLoopndrollSetup() {
 
 export async function getLoopndrollSnapshot() {
   const paths = getLoopndrollPaths();
+  await completePendingHookRemovalIfSafe();
   return loadSnapshot(paths);
 }
 
@@ -327,31 +732,58 @@ export async function registerHooks() {
 
   await ensureRegistered(paths);
   db.update(settings)
-    .set({ hooksAutoRegistration: true, runtimeState: "running" })
+    .set({
+      hooksAutoRegistration: true,
+      runtimeState: "running",
+      hookRemovalPending: false,
+      hookRemovalNextAttemptAt: null,
+    })
     .where(eq(settings.id, 1))
     .run();
+  setHookLifecycleStatus(
+    buildHookLifecycleStatus({
+      requestedAction: "start",
+      appliedAction: "running",
+      deferredAction: "none",
+      remainingRisk: "none",
+      nextAutomaticStep: null,
+      message: "Loopndroll hooks registered and running.",
+      pending: false,
+      objectives: {
+        inertNow: false,
+        removedFromHooksJson: false,
+        unloadedFromLiveRuntime: false,
+      },
+    }),
+  );
 
   return loadSnapshot(paths);
 }
 
 export async function clearHooks() {
-  const paths = getLoopndrollPaths();
-  const { db } = getLoopndrollDatabase(paths.databasePath);
-  await clearManagedHookRegistration(paths);
-  db.update(settings).set({ hooksAutoRegistration: false }).where(eq(settings.id, 1)).run();
-
-  await appendHookDebugLog(paths, {
-    type: "setup",
-    action: "clear-hooks",
-    hooksFilePath: paths.codexHooksPath,
-  });
-
-  return loadSnapshot(paths);
+  await applyIntelligentManagedHookRemoval("clear-managed-hook");
+  return loadSnapshot(getLoopndrollPaths());
 }
 
 export async function pauseLoopndroll() {
   const paths = getLoopndrollPaths();
   setRuntimeState("paused");
+  setHookLifecycleStatus(
+    buildHookLifecycleStatus({
+      requestedAction: "pause",
+      appliedAction: "soft-pause",
+      deferredAction: "none",
+      remainingRisk: "none",
+      nextAutomaticStep: null,
+      message: "soft pause applied because active processes were detected",
+      pending: false,
+      objectives: {
+        inertNow: true,
+        removedFromHooksJson: false,
+        unloadedFromLiveRuntime: false,
+      },
+    }),
+  );
   await appendHookDebugLog(paths, {
     type: "setup",
     action: "pause-loopndroll",
@@ -361,7 +793,31 @@ export async function pauseLoopndroll() {
 
 export async function resumeLoopndroll() {
   const paths = getLoopndrollPaths();
-  setRuntimeState("running");
+  const { db } = getLoopndrollDatabase(paths.databasePath);
+  db.update(settings)
+    .set({
+      runtimeState: "running",
+      hookRemovalPending: false,
+      hookRemovalNextAttemptAt: null,
+    })
+    .where(eq(settings.id, 1))
+    .run();
+  setHookLifecycleStatus(
+    buildHookLifecycleStatus({
+      requestedAction: "resume",
+      appliedAction: "running",
+      deferredAction: "none",
+      remainingRisk: "none",
+      nextAutomaticStep: null,
+      message: "Loopndroll resumed; pending hook removal was cancelled.",
+      pending: false,
+      objectives: {
+        inertNow: false,
+        removedFromHooksJson: false,
+        unloadedFromLiveRuntime: false,
+      },
+    }),
+  );
   await appendHookDebugLog(paths, {
     type: "setup",
     action: "resume-loopndroll",
@@ -370,19 +826,8 @@ export async function resumeLoopndroll() {
 }
 
 export async function stopLoopndroll() {
-  const paths = getLoopndrollPaths();
-  const { db } = getLoopndrollDatabase(paths.databasePath);
-  await clearManagedHookRegistration(paths);
-  db.update(settings)
-    .set({ hooksAutoRegistration: false, runtimeState: "stopped" })
-    .where(eq(settings.id, 1))
-    .run();
-  await appendHookDebugLog(paths, {
-    type: "setup",
-    action: "stop-loopndroll",
-    hooksFilePath: paths.codexHooksPath,
-  });
-  return loadSnapshot(paths);
+  await applyIntelligentManagedHookRemoval("stop");
+  return loadSnapshot(getLoopndrollPaths());
 }
 
 export async function startLoopndroll() {

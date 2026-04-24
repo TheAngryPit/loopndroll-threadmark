@@ -10,6 +10,8 @@ import { getAppRpc } from "./app-rpc";
 export type {
   CompletionCheck,
   CreateLoopNotificationInput,
+  HookLifecycleStatus,
+  HookRemovalWatcherStatus,
   LoopNotification,
   LoopPreset,
   LoopScope,

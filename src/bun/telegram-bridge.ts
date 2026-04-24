@@ -31,7 +31,10 @@ import {
 import {
   clearRemotePromptStateForGlobalPreset,
   clearRemotePromptStateForPreset,
+  disableAllTelegramSessionsViaFailsafe,
+  disableTelegramSessionViaFailsafe,
   findLatestAwaitingTelegramSessionId,
+  findLatestPassiveTelegramReceiptSessionIdBeforeMessage,
   findTelegramReplySessionId,
   findTelegramSessionById,
   findTelegramSessionByRef,
@@ -160,6 +163,17 @@ function parseModeCommand(text: string) {
     preset,
     rawMode,
   };
+}
+
+function parseFailsafeCommand(text: string) {
+  const match = /^\/failsafe(?:@\w+)?\s+(\S+)$/i.exec(text.trim());
+  const target = match?.[1]?.trim() ?? "";
+  if (target.length === 0) {
+    return null;
+  }
+  return target.toLowerCase() === "all"
+    ? { target: "all" as const }
+    : { target: "session" as const, sessionRef: target.toUpperCase() };
 }
 
 function updateSessionPresetFromBridge(db: Database, sessionId: string, preset: LoopPreset | null) {
@@ -506,6 +520,81 @@ async function handleModeCommand(context: TelegramBridgeUpdateContext) {
   });
 }
 
+async function handleFailsafeCommand(context: TelegramBridgeUpdateContext) {
+  const parsedFailsafe = parseFailsafeCommand(context.trimmedText);
+  if (!parsedFailsafe) {
+    await sendTelegramBridgeMessage(
+      context.botToken,
+      context.chatId,
+      "Usage: /failsafe C22 or /failsafe all",
+    );
+    await appendHookDebugLog(context.paths, {
+      type: "telegram-bridge",
+      action: "failsafe-usage",
+      botToken: context.botToken,
+      updateId: context.update.update_id ?? null,
+      chatId: context.chatId,
+    });
+    return;
+  }
+
+  if (parsedFailsafe.target === "all") {
+    disableAllTelegramSessionsViaFailsafe(context.db);
+    await sendTelegramBridgeMessage(
+      context.botToken,
+      context.chatId,
+      "Failsafe all applied. Global mode, per-chat modes, and pending remote prompts were disabled.",
+    );
+    await appendHookDebugLog(context.paths, {
+      type: "telegram-bridge",
+      action: "failsafe-all",
+      botToken: context.botToken,
+      updateId: context.update.update_id ?? null,
+      chatId: context.chatId,
+    });
+    return;
+  }
+
+  const targetSession = findTelegramSessionByRef(
+    context.db,
+    context.botToken,
+    context.chatId,
+    parsedFailsafe.sessionRef,
+  );
+  if (!targetSession) {
+    await sendTelegramBridgeMessage(
+      context.botToken,
+      context.chatId,
+      `Chat ${parsedFailsafe.sessionRef} is not registered to this Telegram destination.`,
+    );
+    await appendHookDebugLog(context.paths, {
+      type: "telegram-bridge",
+      action: "failsafe-miss",
+      botToken: context.botToken,
+      updateId: context.update.update_id ?? null,
+      chatId: context.chatId,
+      sessionRef: parsedFailsafe.sessionRef,
+    });
+    return;
+  }
+
+  disableTelegramSessionViaFailsafe(context.db, targetSession.sessionId);
+  await sendTelegramBridgeMessage(
+    context.botToken,
+    context.chatId,
+    `${formatTelegramTargetSessionLabel(targetSession)} passive failsafe disabled. Pending remote prompts for this chat were cleared.`,
+  );
+  await appendHookDebugLog(context.paths, {
+    type: "telegram-bridge",
+    action: "failsafe-session",
+    botToken: context.botToken,
+    updateId: context.update.update_id ?? null,
+    chatId: context.chatId,
+    sessionId: targetSession.sessionId,
+    sessionRef: targetSession.sessionRef,
+  });
+}
+
 async function handleTelegramBridgeCommand(
   context: TelegramBridgeUpdateContext,
   commandName: string,
@@ -531,6 +620,10 @@ async function handleTelegramBridgeCommand(
       await handleModeCommand(context);
       return true;
     }
+    case "failsafe": {
+      await handleFailsafeCommand(context);
+      return true;
+    }
     default: {
       return false;
     }
@@ -539,15 +632,27 @@ async function handleTelegramBridgeCommand(
 
 async function handleFreeformTelegramMessage(context: TelegramBridgeUpdateContext) {
   const replyToMessageId = context.message.reply_to_message?.message_id;
+  const messageId = context.message.message_id;
   const sessionId =
     typeof replyToMessageId === "number"
       ? findTelegramReplySessionId(context.db, context.botToken, context.chatId, replyToMessageId)
-      : findLatestAwaitingTelegramSessionId(context.db, context.botToken, context.chatId);
+      : (findLatestAwaitingTelegramSessionId(context.db, context.botToken, context.chatId) ??
+        (typeof messageId === "number"
+          ? findLatestPassiveTelegramReceiptSessionIdBeforeMessage(
+              context.db,
+              context.botToken,
+              context.chatId,
+              messageId,
+            )
+          : null));
   if (!sessionId) {
     await appendHookDebugLog(context.paths, {
       type: "telegram-bridge",
       action: "ignored-message",
-      reason: typeof replyToMessageId === "number" ? "unknown-reply-target" : "no-waiting-session",
+      reason:
+        typeof replyToMessageId === "number"
+          ? "unknown-reply-target"
+          : "no-waiting-or-recent-passive-session",
       botToken: context.botToken,
       updateId: context.update.update_id ?? null,
       chatId: context.chatId,
@@ -632,7 +737,12 @@ async function processTelegramBridgeUpdate(
 
   const runtimeState = getLoopndrollRuntimeState(db);
   const commandName = getTelegramCommandName(context.trimmedText);
-  if (runtimeState !== "running" && commandName !== "status" && commandName !== "help") {
+  if (
+    runtimeState !== "running" &&
+    commandName !== "status" &&
+    commandName !== "help" &&
+    commandName !== "failsafe"
+  ) {
     await sendTelegramBridgeMessage(
       context.botToken,
       context.chatId,

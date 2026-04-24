@@ -26,6 +26,52 @@ export type AppUpdateState = {
 
 export type LoopScope = "global" | "per-task";
 export type LoopndrollRuntimeState = "running" | "paused" | "stopped";
+export type HookLifecycleRequestedAction =
+  | "none"
+  | "pause"
+  | "resume"
+  | "start"
+  | "stop"
+  | "clear-managed-hook";
+export type HookLifecycleAppliedAction =
+  | "none"
+  | "running"
+  | "soft-pause"
+  | "full-removal"
+  | "full-removal-deferred";
+export type HookLifecycleDeferredAction = "none" | "remove-managed-hooks-and-unload-runtime";
+export type HookLifecycleRisk =
+  | "none"
+  | "active-processes-detected"
+  | "activity-unknown"
+  | "runtime-unload-unproven";
+
+export type HookLifecycleStatus = {
+  requestedAction: HookLifecycleRequestedAction;
+  appliedAction: HookLifecycleAppliedAction;
+  deferredAction: HookLifecycleDeferredAction;
+  remainingRisk: HookLifecycleRisk;
+  nextAutomaticStep: string | null;
+  message: string;
+  pending: boolean;
+  checkedAt: string | null;
+  objectives: {
+    inertNow: boolean;
+    removedFromHooksJson: boolean;
+    unloadedFromLiveRuntime: boolean;
+  };
+};
+
+export type HookRemovalWatcherStatus = {
+  active: boolean;
+  pid: number | null;
+  lockPath: string;
+  startedAt: string | null;
+  repoRoot: string | null;
+  hooksPath: string | null;
+  runtimeStatePath: string | null;
+  message: string;
+};
 
 export type LoopPreset =
   | "infinite"
@@ -132,7 +178,9 @@ export type LoopndrollSnapshot = {
   health: {
     registered: boolean;
     issues: string[];
+    hookRemovalWatcher: HookRemovalWatcherStatus;
   };
+  hookLifecycle: HookLifecycleStatus;
   sessions: LoopSession[];
 };
 

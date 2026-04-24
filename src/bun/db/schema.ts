@@ -23,6 +23,9 @@ export const settings = sqliteTable("settings", {
   hooksAutoRegistration: integer("hooks_auto_registration", { mode: "boolean" })
     .notNull()
     .default(true),
+  hookRemovalPending: integer("hook_removal_pending", { mode: "boolean" }).notNull().default(false),
+  hookRemovalNextAttemptAt: text("hook_removal_next_attempt_at"),
+  hookLifecycleStatusJson: text("hook_lifecycle_status_json").$type<string | null>(),
 });
 
 export const notifications = sqliteTable("notifications", {
@@ -62,6 +65,7 @@ export const sessions = sqliteTable("sessions", {
     .notNull()
     .default(false),
   threadName: text("thread_name"),
+  orphanedRefreshMissCount: integer("orphaned_refresh_miss_count").notNull().default(0),
   transcriptPath: text("transcript_path"),
   lastAssistantMessage: text("last_assistant_message"),
 });

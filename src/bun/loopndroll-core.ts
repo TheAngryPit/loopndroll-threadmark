@@ -10,11 +10,16 @@ import type {
   LoopPreset,
   LoopScope,
   LoopSession,
+  HookLifecycleStatus,
   LoopndrollSnapshot,
   LoopSessionPresetSource,
   LoopndrollRuntimeState,
 } from "../shared/app-rpc";
 import {
+  HOOK_LIFECYCLE_APPLIED_ACTION_VALUES,
+  HOOK_LIFECYCLE_DEFERRED_ACTION_VALUES,
+  HOOK_LIFECYCLE_REQUESTED_ACTION_VALUES,
+  HOOK_LIFECYCLE_RISK_VALUES,
   LOOP_PRESET_VALUES,
   LOOPNDROLL_RUNTIME_STATE_VALUES,
   LOOP_SCOPE_VALUES,
@@ -51,9 +56,11 @@ export type HooksDocument = {
 export type LoopndrollPaths = {
   appDirectoryPath: string;
   binDirectoryPath: string;
+  stateDirectoryPath: string;
   logsDirectoryPath: string;
   databasePath: string;
   managedHookPath: string;
+  hookRemovalWatchLockPath: string;
   hookDebugLogPath: string;
   codexDirectoryPath: string;
   codexConfigPath: string;
@@ -109,9 +116,11 @@ export function getLoopndrollPaths(): LoopndrollPaths {
   return {
     appDirectoryPath,
     binDirectoryPath: join(appDirectoryPath, "bin"),
+    stateDirectoryPath: join(appDirectoryPath, "state"),
     logsDirectoryPath: join(appDirectoryPath, "logs"),
     databasePath: join(appDirectoryPath, "app.db"),
     managedHookPath: join(appDirectoryPath, "bin", "loopndroll-hook"),
+    hookRemovalWatchLockPath: join(appDirectoryPath, "state", "hook-removal-watch.lock"),
     hookDebugLogPath: join(appDirectoryPath, "logs", "hooks-debug.jsonl"),
     codexDirectoryPath,
     codexConfigPath: join(codexDirectoryPath, "config.toml"),
@@ -196,6 +205,82 @@ export function normalizeLoopndrollRuntimeState(value: unknown): LoopndrollRunti
   return LOOPNDROLL_RUNTIME_STATE_VALUES.includes(value as LoopndrollRuntimeState)
     ? (value as LoopndrollRuntimeState)
     : "running";
+}
+
+export function createDefaultHookLifecycleStatus(): HookLifecycleStatus {
+  return {
+    requestedAction: "none",
+    appliedAction: "none",
+    deferredAction: "none",
+    remainingRisk: "none",
+    nextAutomaticStep: null,
+    message: "No hook lifecycle action has been requested.",
+    pending: false,
+    checkedAt: null,
+    objectives: {
+      inertNow: false,
+      removedFromHooksJson: false,
+      unloadedFromLiveRuntime: false,
+    },
+  };
+}
+
+function normalizeHookLifecycleStatus(value: unknown): HookLifecycleStatus {
+  const fallback = createDefaultHookLifecycleStatus();
+  if (typeof value !== "object" || value === null) {
+    return fallback;
+  }
+
+  const record = value as Partial<HookLifecycleStatus>;
+  const objectives =
+    typeof record.objectives === "object" && record.objectives !== null
+      ? record.objectives
+      : fallback.objectives;
+
+  return {
+    requestedAction: HOOK_LIFECYCLE_REQUESTED_ACTION_VALUES.includes(
+      record.requestedAction as HookLifecycleStatus["requestedAction"],
+    )
+      ? (record.requestedAction as HookLifecycleStatus["requestedAction"])
+      : fallback.requestedAction,
+    appliedAction: HOOK_LIFECYCLE_APPLIED_ACTION_VALUES.includes(
+      record.appliedAction as HookLifecycleStatus["appliedAction"],
+    )
+      ? (record.appliedAction as HookLifecycleStatus["appliedAction"])
+      : fallback.appliedAction,
+    deferredAction: HOOK_LIFECYCLE_DEFERRED_ACTION_VALUES.includes(
+      record.deferredAction as HookLifecycleStatus["deferredAction"],
+    )
+      ? (record.deferredAction as HookLifecycleStatus["deferredAction"])
+      : fallback.deferredAction,
+    remainingRisk: HOOK_LIFECYCLE_RISK_VALUES.includes(
+      record.remainingRisk as HookLifecycleStatus["remainingRisk"],
+    )
+      ? (record.remainingRisk as HookLifecycleStatus["remainingRisk"])
+      : fallback.remainingRisk,
+    nextAutomaticStep:
+      typeof record.nextAutomaticStep === "string" ? record.nextAutomaticStep : null,
+    message: typeof record.message === "string" ? record.message : fallback.message,
+    pending: Boolean(record.pending),
+    checkedAt: typeof record.checkedAt === "string" ? record.checkedAt : null,
+    objectives: {
+      inertNow: Boolean(objectives.inertNow),
+      removedFromHooksJson: Boolean(objectives.removedFromHooksJson),
+      unloadedFromLiveRuntime: Boolean(objectives.unloadedFromLiveRuntime),
+    },
+  };
+}
+
+export function parseHookLifecycleStatus(value: string | null | undefined): HookLifecycleStatus {
+  if (!value) {
+    return createDefaultHookLifecycleStatus();
+  }
+
+  try {
+    return normalizeHookLifecycleStatus(JSON.parse(value));
+  } catch {
+    return createDefaultHookLifecycleStatus();
+  }
 }
 
 export function normalizeScope(value: unknown): LoopScope {
@@ -784,6 +869,7 @@ export function readSnapshotFromDatabase(): Omit<LoopndrollSnapshot, "health"> {
     hooksAutoRegistration: settingsRow.hooksAutoRegistration,
     notifications: notificationRows.map(mapNotificationRow),
     completionChecks: completionCheckRows.map(mapCompletionCheckRow),
+    hookLifecycle: parseHookLifecycleStatus(settingsRow.hookLifecycleStatusJson),
     sessions: sessionRows
       .map((row) =>
         mapSessionRow(

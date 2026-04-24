@@ -18,7 +18,12 @@ import {
 import { Field, FieldContent, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Table, TableBody, TableCell, TableRow } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
-import type { CompletionCheck, LoopNotification } from "@/lib/loopndroll";
+import type {
+  CompletionCheck,
+  HookLifecycleStatus,
+  HookRemovalWatcherStatus,
+  LoopNotification,
+} from "@/lib/loopndroll";
 import {
   getNotificationChannelLabel,
   settingsSectionCardClassName,
@@ -262,6 +267,8 @@ export function CompletionChecksSection(props: {
 
 export function HookRegistrationSection(props: {
   hasResolvedHookState: boolean;
+  hookLifecycle: HookLifecycleStatus | null;
+  hookRemovalWatcher: HookRemovalWatcherStatus | null;
   hooksDetected: boolean;
   runtimeState: "running" | "paused" | "stopped";
   onClearHooks: () => void;
@@ -288,7 +295,30 @@ export function HookRegistrationSection(props: {
           hook installed but inert. Stop removes only the Loopndroll-managed hook.
         </CardDescription>
       </CardHeader>
-      <CardContent />
+      {props.hookLifecycle ? (
+        <CardContent>
+          <div className="rounded-xl border border-border/60 bg-muted/30 p-3 text-xs leading-relaxed text-muted-foreground">
+            <div className="font-medium text-foreground">{props.hookLifecycle.message}</div>
+            <div>Requested: {props.hookLifecycle.requestedAction}</div>
+            <div>Applied: {props.hookLifecycle.appliedAction}</div>
+            <div>Deferred: {props.hookLifecycle.deferredAction}</div>
+            <div>Remaining risk: {props.hookLifecycle.remainingRisk}</div>
+            {props.hookRemovalWatcher ? (
+              <div>
+                Watcher:{" "}
+                {props.hookRemovalWatcher.active
+                  ? `active pid ${props.hookRemovalWatcher.pid}`
+                  : "not running"}
+              </div>
+            ) : null}
+            {props.hookLifecycle.nextAutomaticStep ? (
+              <div>Next automatic step: {props.hookLifecycle.nextAutomaticStep}</div>
+            ) : null}
+          </div>
+        </CardContent>
+      ) : (
+        <CardContent />
+      )}
       <CardFooter className={`${settingsSectionFooterClassName} gap-2`}>
         <div className="flex items-center gap-1 text-sm text-muted-foreground">
           <span>State: {runtimeStateLabel}</span>

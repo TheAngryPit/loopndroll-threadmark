@@ -6,7 +6,10 @@ import {
   listThreadsForCwdViaCodexAppServer,
   type CanonicalThreadDiscoveryRecord,
 } from "./codex-app-server-client";
-import { looksStaleStoredThreadName } from "./thread-name-artifact";
+import {
+  looksInternalThreadNameArtifact,
+  looksStaleStoredThreadName,
+} from "./thread-name-artifact";
 import { deriveThreadNameFromTranscript } from "./thread-name-transcript";
 
 type ThreadNameRefreshCandidate = Pick<
@@ -18,6 +21,34 @@ type ThreadNameRefreshUpdate = {
   threadId: string;
   threadName: string;
 };
+
+type ThreadOrphanRefreshCandidate = ThreadNameRefreshCandidate & {
+  orphanedRefreshMissCount: number;
+};
+
+type ThreadOrphanAction =
+  | {
+      type: "reset";
+      threadId: string;
+    }
+  | {
+      type: "increment";
+      threadId: string;
+      nextMissCount: number;
+    }
+  | {
+      type: "delete";
+      threadId: string;
+    };
+
+export type ThreadNameRefreshResult = {
+  refreshedCount: number;
+  orphanedMissCountUpdated: number;
+  prunedCount: number;
+  resetCount: number;
+};
+
+export const ORPHANED_THREAD_PRUNE_RELAUNCH_LIMIT = 3;
 
 function normalizeThreadName(value: string | null | undefined) {
   if (typeof value !== "string") {
@@ -141,6 +172,56 @@ async function collectTranscriptThreadNameUpdates(
   return updates;
 }
 
+function getEffectiveThreadName(
+  candidate: Pick<ThreadNameRefreshCandidate, "threadId" | "threadName">,
+  updates: ThreadNameRefreshUpdate[],
+) {
+  const matchingUpdate = updates.find((update) => update.threadId === candidate.threadId);
+  return matchingUpdate?.threadName ?? candidate.threadName;
+}
+
+export function collectOrphanedThreadArtifactActions(
+  candidates: ThreadOrphanRefreshCandidate[],
+  discoveredThreads: CanonicalThreadDiscoveryRecord[],
+  updates: ThreadNameRefreshUpdate[],
+  pruneRelaunchLimit = ORPHANED_THREAD_PRUNE_RELAUNCH_LIMIT,
+) {
+  const discoveredThreadIds = new Set(discoveredThreads.map((thread) => thread.threadId));
+  const actions: ThreadOrphanAction[] = [];
+
+  for (const candidate of candidates) {
+    const effectiveThreadName = getEffectiveThreadName(candidate, updates);
+    const canVerifyCanonicalAbsence = normalizeCwd(candidate.cwd) !== null;
+    const looksLikeHiddenArtifact = looksInternalThreadNameArtifact(effectiveThreadName);
+    const isMissingCanonically = !discoveredThreadIds.has(candidate.threadId);
+    const shouldCountAsOrphanedArtifact =
+      canVerifyCanonicalAbsence && looksLikeHiddenArtifact && isMissingCanonically;
+
+    if (shouldCountAsOrphanedArtifact) {
+      const nextMissCount = candidate.orphanedRefreshMissCount + 1;
+      actions.push(
+        nextMissCount >= pruneRelaunchLimit
+          ? { type: "delete", threadId: candidate.threadId }
+          : {
+              type: "increment",
+              threadId: candidate.threadId,
+              nextMissCount,
+            },
+      );
+      continue;
+    }
+
+    if (candidate.orphanedRefreshMissCount > 0) {
+      actions.push({
+        type: "reset",
+        threadId: candidate.threadId,
+      });
+    }
+  }
+
+  return actions;
+}
+
 export async function refreshCanonicalThreadNames(
   db: Database,
   listThreadsForCwd = async (cwd: string) => {
@@ -158,10 +239,11 @@ export async function refreshCanonicalThreadNames(
       thread_id as threadId,
       cwd,
       thread_name as threadName,
+      orphaned_refresh_miss_count as orphanedRefreshMissCount,
       transcript_path as transcriptPath
     from sessions`,
     )
-    .all() as ThreadNameRefreshCandidate[];
+    .all() as ThreadOrphanRefreshCandidate[];
 
   const discoveryCwds = await collectDiscoveryCwds(candidates);
   const discoveredThreads: CanonicalThreadDiscoveryRecord[] = [];
@@ -173,6 +255,11 @@ export async function refreshCanonicalThreadNames(
   const canonicalUpdates = collectCanonicalThreadNameUpdates(candidates, discoveredThreads);
   const transcriptUpdates = await collectTranscriptThreadNameUpdates(candidates, canonicalUpdates);
   const updates = [...canonicalUpdates, ...transcriptUpdates];
+  const orphanActions = collectOrphanedThreadArtifactActions(
+    candidates,
+    discoveredThreads,
+    updates,
+  );
 
   for (const update of updates) {
     db.query("update sessions set thread_name = ? where thread_id = ?").run(
@@ -181,5 +268,33 @@ export async function refreshCanonicalThreadNames(
     );
   }
 
-  return updates.length;
+  let orphanedMissCountUpdated = 0;
+  let prunedCount = 0;
+  let resetCount = 0;
+
+  for (const action of orphanActions) {
+    if (action.type === "delete") {
+      db.query("delete from sessions where thread_id = ?").run(action.threadId);
+      prunedCount += 1;
+      continue;
+    }
+
+    db.query("update sessions set orphaned_refresh_miss_count = ? where thread_id = ?").run(
+      action.type === "increment" ? action.nextMissCount : 0,
+      action.threadId,
+    );
+
+    if (action.type === "increment") {
+      orphanedMissCountUpdated += 1;
+    } else {
+      resetCount += 1;
+    }
+  }
+
+  return {
+    refreshedCount: updates.length,
+    orphanedMissCountUpdated,
+    prunedCount,
+    resetCount,
+  } satisfies ThreadNameRefreshResult;
 }

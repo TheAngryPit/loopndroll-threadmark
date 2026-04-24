@@ -32,15 +32,18 @@ export default {
       codesign: enableCodesign,
       notarize: enableNotarize,
       bundleCEF: false,
-      icons: "build/icon.iconset",
+      icons: undefined,
     },
     linux: {
       bundleCEF: false,
-      icon: "build/icon.png",
+      icon: "src/assets/app-icon.png",
     },
     win: {
       bundleCEF: false,
-      icon: "build/icon.png",
+      icon: "src/assets/app-icon.png",
     },
+  },
+  scripts: {
+    postBuild: "scripts/copy-macos-app-icon.ts",
   },
 } satisfies ElectrobunConfig;

@@ -24,7 +24,7 @@ function seedQueuedPrompt(db: Database, threadId: string, promptText: string) {
 }
 
 describe("tryPassiveSimpleWake", () => {
-  test("clears the queued prompt when wake succeeds", async () => {
+  test("keeps the queued prompt and returns Working until completion cleanup runs", async () => {
     const db = new Database(":memory:");
     createPromptTable(db);
     seedQueuedPrompt(db, "thr_123", "Continue with the Telegram reply.");
@@ -49,7 +49,9 @@ describe("tryPassiveSimpleWake", () => {
       status: "woke",
       ackText: "Working on [project] [C12] Fix passive wake.",
     });
-    expect(row).toBeNull();
+    expect(row).toEqual({
+      prompt_text: "Continue with the Telegram reply.",
+    });
   });
 
   test("keeps the queued prompt when wake is unavailable", async () => {

@@ -36,6 +36,7 @@ import {
   setLoopScope,
   setSessionPreset,
   startLoopndroll,
+  startHookRemovalPendingMonitor,
   startLoopndrollTelegramBridge,
   stopLoopndroll,
   updateCompletionCheck,
@@ -653,6 +654,7 @@ function createWindowRpc() {
 const windowRpc = createWindowRpc();
 
 installApplicationMenu();
+void startHookRemovalPendingMonitor();
 startLoopndrollTelegramBridge();
 void initializeUpdater();
 

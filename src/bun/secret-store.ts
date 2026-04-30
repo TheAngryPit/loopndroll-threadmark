@@ -45,6 +45,28 @@ export function createSlackWebhookUrlKeychainRef(notificationId: string) {
   return `${SLACK_WEBHOOK_URL_REF_PREFIX}${encodeURIComponent(encodeKeychainAccount(notificationId))}`;
 }
 
+export function getTelegramBotTokenMigrationRef(
+  notificationId: string,
+  botToken: string,
+  refsByPlaintextToken: Map<string, string>,
+) {
+  const normalizedBotToken = botToken.trim();
+  const existingRef = refsByPlaintextToken.get(normalizedBotToken);
+  if (existingRef) {
+    return {
+      ref: existingRef,
+      shouldStore: false,
+    };
+  }
+
+  const ref = createTelegramBotTokenKeychainRef(notificationId);
+  refsByPlaintextToken.set(normalizedBotToken, ref);
+  return {
+    ref,
+    shouldStore: true,
+  };
+}
+
 function runSecurityCommand(args: string[]) {
   const result = spawnSync("/usr/bin/security", args, {
     encoding: "utf8",

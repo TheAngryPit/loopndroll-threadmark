@@ -46,6 +46,7 @@ import {
 import {
   deleteSlackWebhookUrlFromKeychain,
   deleteTelegramBotTokenFromKeychain,
+  getTelegramBotTokenMigrationRef,
   isSlackWebhookUrlKeychainRef,
   isTelegramBotTokenKeychainRef,
   resolveSlackWebhookUrl,
@@ -83,7 +84,7 @@ async function redactSecretsFromManagedLogs(secrets: string[]) {
   }
 }
 
-function redactPersistedTelegramBotToken(
+export function redactPersistedTelegramBotToken(
   client: ReturnType<typeof getLoopndrollDatabase>["client"],
   plaintextBotToken: string,
   botTokenRef: string,
@@ -154,6 +155,28 @@ function redactPersistedTelegramBotToken(
       .run(nextToken, oldToken);
     client.query("delete from telegram_delivery_receipts where bot_token = ?").run(oldToken);
   })();
+}
+
+function deleteTelegramBotTokenFromKeychainIfUnused(
+  db: ReturnType<typeof getLoopndrollDatabase>["db"],
+  botTokenOrRef: string | null | undefined,
+) {
+  if (typeof botTokenOrRef !== "string" || !isTelegramBotTokenKeychainRef(botTokenOrRef)) {
+    return;
+  }
+  const botTokenRef = botTokenOrRef.trim();
+
+  const remainingRef = db
+    .select({ id: notifications.id })
+    .from(notifications)
+    .where(and(eq(notifications.channel, "telegram"), eq(notifications.botToken, botTokenRef)))
+    .limit(1)
+    .get();
+  if (remainingRef) {
+    return;
+  }
+
+  deleteTelegramBotTokenFromKeychain(botTokenRef);
 }
 
 export async function saveDefaultPrompt(defaultPrompt: string) {
@@ -262,9 +285,8 @@ export async function updateLoopNotification(notification: UpdateLoopNotificatio
   if (notification.channel === "slack") {
     const previousWebhookUrl =
       currentNotification.channel === "slack" ? currentNotification.webhookUrl : "";
-    if (currentNotification.channel === "telegram") {
-      deleteTelegramBotTokenFromKeychain(currentNotification.botToken);
-    }
+    const previousBotToken =
+      currentNotification.channel === "telegram" ? currentNotification.botToken : "";
     const webhookUrlRef = isSlackWebhookUrlKeychainRef(notification.webhookUrl)
       ? notification.webhookUrl.trim()
       : storeSlackWebhookUrlInKeychain(notification.id, notification.webhookUrl);
@@ -282,6 +304,7 @@ export async function updateLoopNotification(notification: UpdateLoopNotificatio
       })
       .where(eq(notifications.id, notification.id))
       .run();
+    deleteTelegramBotTokenFromKeychainIfUnused(db, previousBotToken);
   } else {
     const previousBotToken =
       currentNotification.channel === "telegram" ? currentNotification.botToken : "";
@@ -308,6 +331,7 @@ export async function updateLoopNotification(notification: UpdateLoopNotificatio
       })
       .where(eq(notifications.id, notification.id))
       .run();
+    deleteTelegramBotTokenFromKeychainIfUnused(db, previousBotToken);
   }
 
   return loadSnapshot(paths);
@@ -364,7 +388,7 @@ export async function deleteLoopNotification(notificationId: string) {
       .where(eq(settings.globalNotificationId, notificationId))
       .run();
   });
-  deleteTelegramBotTokenFromKeychain(existingNotification?.botToken);
+  deleteTelegramBotTokenFromKeychainIfUnused(db, existingNotification?.botToken);
   deleteSlackWebhookUrlFromKeychain(existingNotification?.webhookUrl);
 
   return loadSnapshot(paths);
@@ -378,6 +402,7 @@ export async function migrateNotificationSecretsToKeychain() {
     .from(notifications)
     .orderBy(asc(notifications.createdAt), asc(notifications.id))
     .all();
+  const migratedTelegramBotTokenRefs = new Map<string, string>();
 
   for (const row of existingNotificationRows) {
     const currentNotification = mapNotificationRow(row);
@@ -414,7 +439,16 @@ export async function migrateNotificationSecretsToKeychain() {
       continue;
     }
 
-    const botTokenRef = storeTelegramBotTokenInKeychain(currentNotification.id, botToken);
+    const botTokenMigration = getTelegramBotTokenMigrationRef(
+      currentNotification.id,
+      botToken,
+      migratedTelegramBotTokenRefs,
+    );
+    let botTokenRef = botTokenMigration.ref;
+    if (botTokenMigration.shouldStore) {
+      botTokenRef = storeTelegramBotTokenInKeychain(currentNotification.id, botToken);
+      migratedTelegramBotTokenRefs.set(botToken, botTokenRef);
+    }
     redactPersistedTelegramBotToken(client, botToken, botTokenRef);
     await redactSecretsFromManagedLogs([botToken]);
     db.update(notifications)

@@ -3,6 +3,7 @@ import { describe, expect, test } from "bun:test";
 import {
   createSlackWebhookUrlKeychainRef,
   createTelegramBotTokenKeychainRef,
+  getTelegramBotTokenMigrationRef,
   isSlackWebhookUrlKeychainRef,
   isTelegramBotTokenKeychainRef,
 } from "./secret-store";
@@ -18,6 +19,30 @@ describe("telegram bot token keychain refs", () => {
 
   test("does not classify plain Telegram tokens as keychain references", () => {
     expect(isTelegramBotTokenKeychainRef("bot-id:opaque-token-value")).toBe(false);
+  });
+
+  test("reuses one migration ref for notifications sharing a plaintext bot token", () => {
+    const refsByPlaintextToken = new Map<string, string>();
+
+    const first = getTelegramBotTokenMigrationRef(
+      "notification-1",
+      "bot-id:opaque-token-value",
+      refsByPlaintextToken,
+    );
+    const second = getTelegramBotTokenMigrationRef(
+      "notification-2",
+      "bot-id:opaque-token-value",
+      refsByPlaintextToken,
+    );
+
+    expect(first).toEqual({
+      ref: "keychain://loopndroll/telegram-bot-token/notification-1",
+      shouldStore: true,
+    });
+    expect(second).toEqual({
+      ref: first.ref,
+      shouldStore: false,
+    });
   });
 });
 

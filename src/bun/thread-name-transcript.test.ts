@@ -25,4 +25,12 @@ describe("deriveThreadNameFromUserText", () => {
 
     expect(result).toBeNull();
   });
+
+  test("does not classify regular Java prompts as boilerplate", () => {
+    const result = deriveThreadNameFromUserText(
+      ["Java migration plan", "## JavaScript REPL (Node)"].join("\n"),
+    );
+
+    expect(result).toBe("Java migration plan");
+  });
 });

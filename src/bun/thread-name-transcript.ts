@@ -11,7 +11,7 @@ function isInstructionBoilerplate(line: string) {
   const normalized = line.toLowerCase();
   return (
     normalized.startsWith("agents.md instructions") ||
-    normalized.startsWith("java") ||
+    /^javascript\s+repl\b/.test(normalized) ||
     normalized === "<instructions>" ||
     normalized === "</instructions>" ||
     normalized.startsWith("you are a memory writing agent.") ||

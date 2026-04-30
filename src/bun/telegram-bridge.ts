@@ -122,6 +122,23 @@ function getLoopndrollRuntimeState(db: Database) {
   return normalizeLoopndrollRuntimeState(row?.runtime_state);
 }
 
+export function isTelegramCommandAllowedInRuntimeState(
+  runtimeState: ReturnType<typeof normalizeLoopndrollRuntimeState>,
+  commandName: string | null,
+) {
+  if (runtimeState === "running") {
+    return true;
+  }
+
+  return (
+    commandName === "status" ||
+    commandName === "help" ||
+    commandName === "list" ||
+    commandName === "mode" ||
+    commandName === "failsafe"
+  );
+}
+
 function parseReplyCommand(text: string) {
   const match = /^\/reply(?:@\w+)?\s+(\S+)\s+([\s\S]+)$/i.exec(text.trim());
   if (!match) {
@@ -706,12 +723,7 @@ async function processTelegramBridgeUpdate(
 
   const runtimeState = getLoopndrollRuntimeState(db);
   const commandName = getTelegramCommandName(context.trimmedText);
-  if (
-    runtimeState !== "running" &&
-    commandName !== "status" &&
-    commandName !== "help" &&
-    commandName !== "failsafe"
-  ) {
+  if (!isTelegramCommandAllowedInRuntimeState(runtimeState, commandName)) {
     await sendTelegramBridgeMessage(
       context.botToken,
       context.chatId,
@@ -807,9 +819,6 @@ export async function pollTelegramBridgeBotToken(
 async function pollTelegramReplies() {
   const paths = getLoopndrollPaths();
   const { client } = getLoopndrollDatabase(paths.databasePath);
-  if (getLoopndrollRuntimeState(client) === "stopped") {
-    return;
-  }
   const botTokens = getTelegramBridgeBotTokens(client);
 
   for (const botToken of botTokens) {

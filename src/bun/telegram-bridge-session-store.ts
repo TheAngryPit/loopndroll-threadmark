@@ -45,10 +45,16 @@ export function getTelegramSessionBridgeStates(
       `select distinct rp.thread_id as session_id
       from session_remote_prompts rp
       inner join sessions s on s.thread_id = rp.thread_id
+      inner join session_notifications sn on sn.thread_id = s.thread_id
+      inner join notifications n on n.id = sn.notification_id
       where rp.source = 'telegram'
+        and rp.telegram_chat_id = ?
+        and n.channel = 'telegram'
+        and n.bot_token = ?
+        and n.chat_id = ?
         and s.archived = 0`,
     )
-    .all() as Array<{ session_id?: string }>;
+    .all(chatId, botToken, chatId) as Array<{ session_id?: string }>;
 
   return {
     awaitingReplySessionIds: new Set(

@@ -63,6 +63,8 @@ function createTelegramBridgeSchema(db: Database) {
       source text not null,
       delivery_mode text not null,
       prompt_text text not null,
+      telegram_chat_id text,
+      telegram_message_id integer,
       created_at text not null,
       primary key(thread_id, delivery_mode)
     );
@@ -124,8 +126,19 @@ function insertTelegramNotification(db: Database) {
   ).run();
 }
 
+function insertOtherTelegramNotification(db: Database) {
+  db.query(
+    "insert into notifications (id, channel, bot_token, chat_id) values ('n2', 'telegram', 'bot', 'other-chat')",
+  ).run();
+}
+
 function attachTelegramNotification(db: Database, threadIds: string[]) {
   const values = threadIds.map((threadId) => `('${threadId}', 'n1')`).join(",");
+  db.query(`insert into session_notifications (thread_id, notification_id) values ${values}`).run();
+}
+
+function attachOtherTelegramNotification(db: Database, threadIds: string[]) {
+  const values = threadIds.map((threadId) => `('${threadId}', 'n2')`).join(",");
   db.query(`insert into session_notifications (thread_id, notification_id) values ${values}`).run();
 }
 
@@ -356,8 +369,11 @@ describe("telegram bridge status states", () => {
   test("reports awaiting replies and queued Telegram prompts for status output", () => {
     const db = new Database(":memory:");
     createTelegramBridgeSchema(db);
+    insertTelegramNotification(db);
     insertFailsafeFixtureSessions(db);
     insertFailsafeFixtureRemoteState(db);
+    attachTelegramNotification(db, ["thr_target", "thr_other"]);
+    db.query("update session_remote_prompts set telegram_chat_id = 'chat'").run();
 
     const states = getTelegramSessionBridgeStates(db, "bot", "chat");
 
@@ -365,5 +381,40 @@ describe("telegram bridge status states", () => {
     expect(states.awaitingReplySessionIds.has("thr_other")).toBe(true);
     expect(states.queuedPromptSessionIds.has("thr_target")).toBe(true);
     expect(states.queuedPromptSessionIds.has("thr_other")).toBe(true);
+  });
+
+  test("scopes queued Telegram prompt status to the active destination", () => {
+    const db = new Database(":memory:");
+    createTelegramBridgeSchema(db);
+    insertTelegramNotification(db);
+    insertOtherTelegramNotification(db);
+    insertFailsafeFixtureSessions(db);
+    attachTelegramNotification(db, ["thr_target"]);
+    attachOtherTelegramNotification(db, ["thr_target"]);
+    db.query(
+      `insert into session_remote_prompts (
+        thread_id,
+        source,
+        delivery_mode,
+        prompt_text,
+        telegram_chat_id,
+        telegram_message_id,
+        created_at
+      ) values (
+        'thr_target',
+        'telegram',
+        'once',
+        'queued from first chat',
+        'chat',
+        10,
+        '2026-04-23T10:03:00.000Z'
+      )`,
+    ).run();
+
+    const firstChatStates = getTelegramSessionBridgeStates(db, "bot", "chat");
+    const secondChatStates = getTelegramSessionBridgeStates(db, "bot", "other-chat");
+
+    expect(firstChatStates.queuedPromptSessionIds.has("thr_target")).toBe(true);
+    expect(secondChatStates.queuedPromptSessionIds.has("thr_target")).toBe(false);
   });
 });

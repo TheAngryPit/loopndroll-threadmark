@@ -9,6 +9,10 @@ import {
 } from "../constants";
 import { hookLifecycleMigrations } from "./hook-lifecycle-migrations";
 import { nowIsoString, shouldIgnoreMigrationStatementError } from "./migration-runtime";
+import {
+  PARK_PASSIVE_OVERRIDABLE_SESSION_ID_STATEMENTS,
+  PARK_PASSIVE_SESSION_ID_STATEMENTS,
+} from "./passive-preset-migration-statements";
 
 export type AppMigration = { id: number; name: string; statements: string[] };
 
@@ -197,6 +201,7 @@ export const appMigrations: AppMigration[] = [
     name: "await_reply_preset_and_waiters",
     statements: [
       `pragma foreign_keys = off`,
+      ...PARK_PASSIVE_SESSION_ID_STATEMENTS,
       `alter table settings rename to settings_old`,
       `create table settings (
         id integer primary key,
@@ -496,6 +501,7 @@ export const appMigrations: AppMigration[] = [
     name: "completion_checks_preset_constraints",
     statements: [
       `pragma foreign_keys = off`,
+      ...PARK_PASSIVE_OVERRIDABLE_SESSION_ID_STATEMENTS,
       `alter table settings rename to settings_old`,
       `create table settings (
         id integer primary key,
@@ -704,6 +710,7 @@ export const appMigrations: AppMigration[] = [
     name: "preset_constraints",
     statements: [
       `pragma foreign_keys = off`,
+      ...PARK_PASSIVE_OVERRIDABLE_SESSION_ID_STATEMENTS,
       `alter table settings rename to settings_old`,
       `create table settings (
         id integer primary key,

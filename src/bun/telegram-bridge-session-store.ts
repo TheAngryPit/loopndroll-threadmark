@@ -10,6 +10,7 @@ import {
   buildTelegramPromptReceivedText,
   getTelegramRemotePromptDeliveryMode,
 } from "./telegram-control";
+import { looksInternalThreadNameArtifact } from "./thread-name-artifact";
 import type { TelegramInboundMessage } from "./telegram-utils";
 
 export type TelegramBridgeTargetSession = {
@@ -139,13 +140,16 @@ export function listRegisteredTelegramSessions(
         lastAssistantMessage: row.last_assistant_message,
       } satisfies LoopSession;
     })
-    .filter((session) => {
-      return !(
-        session.notificationIds.length === 0 &&
-        session.transcriptPath === null &&
-        (session.lastAssistantMessage?.startsWith('{"title":') ?? false)
-      );
-    });
+    .filter((session) => isVisibleTelegramBridgeSession(session));
+}
+
+function isVisibleTelegramBridgeSession(session: LoopSession) {
+  return !(
+    looksInternalThreadNameArtifact(session.threadName) ||
+    (session.notificationIds.length === 0 &&
+      session.transcriptPath === null &&
+      (session.lastAssistantMessage?.startsWith('{"title":') ?? false))
+  );
 }
 
 export function getEffectivePresetForSession(db: Database, sessionId: string) {
@@ -268,7 +272,7 @@ export function findTelegramSessionByRef(
     title?: string | null;
   } | null;
 
-  if (!row?.session_id || !row?.session_ref) {
+  if (!row?.session_id || !row?.session_ref || looksInternalThreadNameArtifact(row.title)) {
     return null;
   }
 

@@ -118,33 +118,53 @@ function insertFailsafeFixtureRemoteState(db: Database) {
   ).run();
 }
 
+function insertTelegramNotification(db: Database) {
+  db.query(
+    "insert into notifications (id, channel, bot_token, chat_id) values ('n1', 'telegram', 'bot', 'chat')",
+  ).run();
+}
+
+function attachTelegramNotification(db: Database, threadIds: string[]) {
+  const values = threadIds.map((threadId) => `('${threadId}', 'n1')`).join(",");
+  db.query(`insert into session_notifications (thread_id, notification_id) values ${values}`).run();
+}
+
+function insertRegisteredSession(
+  db: Database,
+  input: { threadId: string; sessionRef: string; cwd: string; title: string; seenAt: string },
+) {
+  db.query(
+    `insert into sessions (
+      thread_id,
+      session_ref,
+      cwd,
+      thread_name,
+      transcript_path,
+      last_assistant_message,
+      first_seen_at,
+      last_seen_at,
+      active_since,
+      preset,
+      preset_overridden,
+      archived
+    ) values (?, ?, ?, ?, null, null, ?, ?, null, 'await-reply', 1, 0)`,
+  ).run(input.threadId, input.sessionRef, input.cwd, input.title, input.seenAt, input.seenAt);
+}
+
 describe("telegram bridge session store", () => {
   test("lists registered sessions from the current thread_id/thread_name schema", () => {
     const db = new Database(":memory:");
     createTelegramBridgeSchema(db);
 
-    db.query(
-      "insert into notifications (id, channel, bot_token, chat_id) values ('n1', 'telegram', 'bot', 'chat')",
-    ).run();
-    db.query(
-      `insert into sessions (
-        thread_id,
-        session_ref,
-        cwd,
-        thread_name,
-        transcript_path,
-        last_assistant_message,
-        first_seen_at,
-        last_seen_at,
-        active_since,
-        preset,
-        preset_overridden,
-        archived
-      ) values (?, 'C22', '/tmp/project', 'Fix hook lifecycle', null, null, ?, ?, null, 'await-reply', 0, 0)`,
-    ).run("thr_123", "2026-04-23T10:00:00.000Z", "2026-04-23T10:00:00.000Z");
-    db.query(
-      "insert into session_notifications (thread_id, notification_id) values ('thr_123', 'n1')",
-    ).run();
+    insertTelegramNotification(db);
+    insertRegisteredSession(db, {
+      threadId: "thr_123",
+      sessionRef: "C22",
+      cwd: "/tmp/project",
+      title: "Fix hook lifecycle",
+      seenAt: "2026-04-23T10:00:00.000Z",
+    });
+    attachTelegramNotification(db, ["thr_123"]);
 
     const sessions = listRegisteredTelegramSessions(db, "bot", "chat");
 
@@ -162,6 +182,37 @@ describe("telegram bridge session store", () => {
       sessionRef: "C22",
       cwd: "/tmp/project",
       title: "Fix hook lifecycle",
+    });
+  });
+
+  test("hides internal thread-name artifacts from Telegram list and ref lookup", () => {
+    const db = new Database(":memory:");
+    createTelegramBridgeSchema(db);
+
+    insertTelegramNotification(db);
+    insertRegisteredSession(db, {
+      threadId: "thr_internal",
+      sessionRef: "C30",
+      cwd: "/tmp/project",
+      title: "AGENTS.md instructions for /tmp/project",
+      seenAt: "2026-04-23T10:00:00.000Z",
+    });
+    insertRegisteredSession(db, {
+      threadId: "thr_real",
+      sessionRef: "C31",
+      cwd: "/tmp/memories",
+      title: "Memory Writing Agent: Phase 2 (Consolidation)",
+      seenAt: "2026-04-23T11:00:00.000Z",
+    });
+    attachTelegramNotification(db, ["thr_internal", "thr_real"]);
+
+    const sessions = listRegisteredTelegramSessions(db, "bot", "chat");
+
+    expect(sessions.map((session) => session.sessionId)).toEqual(["thr_real"]);
+    expect(findTelegramSessionByRef(db, "bot", "chat", "C30")).toBeNull();
+    expect(findTelegramSessionByRef(db, "bot", "chat", "C31")).toMatchObject({
+      sessionId: "thr_real",
+      title: "Memory Writing Agent: Phase 2 (Consolidation)",
     });
   });
 

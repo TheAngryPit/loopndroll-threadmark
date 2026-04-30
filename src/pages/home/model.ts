@@ -5,27 +5,6 @@ import { useLoopndrollState } from "@/lib/use-loopndroll-state";
 import { getSessionRef } from "./ui";
 
 const EMPTY_SESSIONS: LoopSession[] = [];
-const HIDDEN_PROJECT_LABELS = new Set(["memories"]);
-
-function getSessionProjectLabel(session: LoopSession) {
-  const cwd = session.cwd?.trim();
-  if (!cwd) {
-    return "";
-  }
-
-  return (
-    cwd
-      .replace(/\\/g, "/")
-      .split("/")
-      .map((segment) => segment.trim())
-      .filter(Boolean)
-      .at(-1) ?? ""
-  );
-}
-
-function isHiddenSystemSession(session: LoopSession) {
-  return HIDDEN_PROJECT_LABELS.has(getSessionProjectLabel(session).toLowerCase());
-}
 
 function createSessionRefs(sessions: LoopSession[]) {
   return new Map(
@@ -213,11 +192,7 @@ export function useHomeRouteModel() {
   const [openActionsSessionId, setOpenActionsSessionId] = useState<string | null>(null);
   const displaySessions = useMemo(
     () =>
-      sessions.filter(
-        (session) =>
-          !isHiddenSystemSession(session) &&
-          (showArchivedSessions ? session.archived : !session.archived),
-      ),
+      sessions.filter((session) => (showArchivedSessions ? session.archived : !session.archived)),
     [sessions, showArchivedSessions],
   );
   const sortedSessions = useMemo(
@@ -228,10 +203,7 @@ export function useHomeRouteModel() {
   const { pendingSessionPresets, setPendingSessionPresets } =
     usePendingSessionPresets(displaySessions);
   const now = useSessionClock();
-  const visibleSessions = useMemo(
-    () => sessions.filter((session) => !isHiddenSystemSession(session)),
-    [sessions],
-  );
+  const visibleSessions = sessions;
   const sessionRefs = useMemo(() => createSessionRefs(visibleSessions), [visibleSessions]);
   const actions = createHomeRouteActions({
     completionChecks,

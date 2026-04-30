@@ -7,13 +7,10 @@ import {
   LOOP_SESSION_SOURCE_VALUES,
   NOTIFICATION_CHANNEL_VALUES,
 } from "../constants";
+import { hookLifecycleMigrations } from "./hook-lifecycle-migrations";
 import { nowIsoString, shouldIgnoreMigrationStatementError } from "./migration-runtime";
 
-export type AppMigration = {
-  id: number;
-  name: string;
-  statements: string[];
-};
+export type AppMigration = { id: number; name: string; statements: string[] };
 
 const SETTINGS_SCOPE_CHECK = LOOP_SCOPE_VALUES.map((value) => `'${value}'`).join(", ");
 const PRESET_CHECK = LOOP_PRESET_VALUES.map((value) => `'${value}'`).join(", ");
@@ -704,7 +701,7 @@ export const appMigrations: AppMigration[] = [
   },
   {
     id: 16,
-    name: "passive_preset_constraints",
+    name: "preset_constraints",
     statements: [
       `pragma foreign_keys = off`,
       `alter table settings rename to settings_old`,
@@ -942,16 +939,7 @@ export const appMigrations: AppMigration[] = [
            or orphaned_refresh_miss_count < 0`,
     ],
   },
-  {
-    id: 20,
-    name: "hook_lifecycle_status",
-    statements: [
-      `alter table settings add column hook_removal_pending integer not null default 0 check (hook_removal_pending in (0, 1))`,
-      `alter table settings add column hook_removal_next_attempt_at text`,
-      `alter table settings add column hook_lifecycle_status_json text`,
-      `update settings set hook_removal_pending = 0 where hook_removal_pending is null`,
-    ],
-  },
+  ...hookLifecycleMigrations,
 ];
 
 export function applyAppMigrations(

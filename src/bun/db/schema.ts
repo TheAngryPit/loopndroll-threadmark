@@ -23,6 +23,7 @@ export const settings = sqliteTable("settings", {
   hooksAutoRegistration: integer("hooks_auto_registration", { mode: "boolean" })
     .notNull()
     .default(true),
+  mirrorEnabled: integer("mirror_enabled", { mode: "boolean" }).notNull().default(false),
   hookRemovalPending: integer("hook_removal_pending", { mode: "boolean" }).notNull().default(false),
   hookRemovalNextAttemptAt: text("hook_removal_next_attempt_at"),
   hookLifecycleStatusJson: text("hook_lifecycle_status_json").$type<string | null>(),

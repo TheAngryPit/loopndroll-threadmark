@@ -21,13 +21,13 @@
     "build:dev": "vite build && electrobun build",
     "build:stable": "vite build && electrobun build --env=stable",
     "release:macos": "bash scripts/release-macos.sh",
-    "build": "pnpm run build:dev",
+    "build": "vite build && electrobun build",
     "lint": "oxlint src electrobun.config.ts vite.config.ts --deny-warnings",
     "lint:fix": "oxlint src electrobun.config.ts vite.config.ts --fix",
     "format": "oxfmt src electrobun.config.ts vite.config.ts",
     "format:check": "oxfmt --check src electrobun.config.ts vite.config.ts",
     "typecheck": "tsgo --noEmit -p tsconfig.json",
-    "check": "pnpm run lint && pnpm run format:check && pnpm run typecheck"
+    "check": "oxlint src electrobun.config.ts vite.config.ts --deny-warnings && oxfmt --check src electrobun.config.ts vite.config.ts && tsgo --noEmit -p tsconfig.json"
   },
   "dependencies": {
     "@base-ui/react": "^1.3.0",

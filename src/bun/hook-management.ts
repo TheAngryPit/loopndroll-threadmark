@@ -344,8 +344,18 @@ async function computeHealth(paths: LoopndrollPaths) {
     issues.push("Managed hook executable is missing.");
   }
 
+  const allRequiredHooksRegistered =
+    hasManagedSessionStart && hasManagedStop && hasManagedUserPromptSubmit;
+  const codexHooksEnabled =
+    runtimeState === "stopped" ||
+    Boolean(configContents && /\bcodex_hooks\s*=\s*true\b/.test(configContents));
+  const fullyRegistered =
+    runtimeState === "stopped"
+      ? managedHookPaths.length > 0
+      : allRequiredHooksRegistered && codexHooksEnabled && scriptExists;
+
   return {
-    registered: managedHookPaths.length > 0,
+    registered: fullyRegistered,
     issues,
     hookRemovalWatcher: await getHookRemovalWatcherStatus(paths),
   };
@@ -450,7 +460,7 @@ function buildSoftPauseStatus(
     deferredAction: "remove-managed-hooks-and-unload-runtime",
     remainingRisk,
     nextAutomaticStep:
-      "Recheck Codex runtime activity; when idle, remove managed hooks and restart app-server.",
+      "Recheck Codex runtime activity; when idle, remove managed hooks. Live runtime unload is not claimed until Codex reloads hooks.",
     message:
       inspection.status === "active"
         ? "soft pause applied because active processes were detected"
@@ -481,33 +491,24 @@ async function inspectRuntimeActivity(): Promise<CodexRuntimeActivityInspection>
   }
 }
 
-async function restartAppServerForHookUnload() {
-  const inspection = await inspectRuntimeActivity();
-  return inspection.status !== "unknown";
-}
-
 async function completeManagedHookRemoval(
   requestedAction: HookLifecycleRequestedAction,
   paths: LoopndrollPaths,
 ) {
   const removal = await clearManagedHookRegistration(paths);
-  const unloaded = await restartAppServerForHookUnload();
   const status = buildHookLifecycleStatus({
     requestedAction,
-    appliedAction: unloaded ? "full-removal" : "full-removal-deferred",
-    deferredAction: unloaded ? "none" : "remove-managed-hooks-and-unload-runtime",
-    remainingRisk: unloaded ? "none" : "runtime-unload-unproven",
-    nextAutomaticStep: unloaded
-      ? null
-      : "Retry app-server restart when runtime activity is known safe.",
-    message: unloaded
-      ? "full removal completed immediately; runtime unload required app-server restart"
-      : "managed hooks were removed from hooks.json but runtime unload is still unproven",
-    pending: !unloaded,
+    appliedAction: "full-removal-deferred",
+    deferredAction: "none",
+    remainingRisk: "runtime-unload-unproven",
+    nextAutomaticStep: null,
+    message:
+      "managed hooks were removed from hooks.json; live Codex runtime unload is not proven until Codex reloads hooks",
+    pending: false,
     objectives: {
       inertNow: true,
       removedFromHooksJson: true,
-      unloadedFromLiveRuntime: unloaded,
+      unloadedFromLiveRuntime: false,
     },
   });
 
@@ -515,7 +516,7 @@ async function completeManagedHookRemoval(
   db.update(settings)
     .set({
       hooksAutoRegistration: false,
-      runtimeState: unloaded ? "stopped" : "paused",
+      runtimeState: "stopped",
     })
     .where(eq(settings.id, 1))
     .run();
@@ -527,7 +528,7 @@ async function completeManagedHookRemoval(
     inspectedPaths: removal.inspectedPaths,
     changedPaths: removal.changedPaths,
     managedHookCountBefore: removal.managedHookCountBefore,
-    runtimeUnloadRestartedAppServer: unloaded,
+    runtimeUnloadProven: false,
   });
 
   return setHookLifecycleStatus(status);
@@ -745,9 +746,11 @@ export async function registerHooks() {
       requestedAction: "start",
       appliedAction: "running",
       deferredAction: "none",
-      remainingRisk: "none",
-      nextAutomaticStep: null,
-      message: "Loopndroll hooks registered and running.",
+      remainingRisk: "runtime-unload-unproven",
+      nextAutomaticStep:
+        "Start a new Codex turn or restart the app-server lane if live hook load is stale.",
+      message:
+        "Loopndroll hooks were installed in hooks.json; live Codex runtime load is not assumed.",
       pending: false,
       objectives: {
         inertNow: false,

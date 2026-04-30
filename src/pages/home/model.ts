@@ -5,6 +5,27 @@ import { useLoopndrollState } from "@/lib/use-loopndroll-state";
 import { getSessionRef } from "./ui";
 
 const EMPTY_SESSIONS: LoopSession[] = [];
+const HIDDEN_PROJECT_LABELS = new Set(["memories"]);
+
+function getSessionProjectLabel(session: LoopSession) {
+  const cwd = session.cwd?.trim();
+  if (!cwd) {
+    return "";
+  }
+
+  return (
+    cwd
+      .replace(/\\/g, "/")
+      .split("/")
+      .map((segment) => segment.trim())
+      .filter(Boolean)
+      .at(-1) ?? ""
+  );
+}
+
+function isHiddenSystemSession(session: LoopSession) {
+  return HIDDEN_PROJECT_LABELS.has(getSessionProjectLabel(session).toLowerCase());
+}
 
 function createSessionRefs(sessions: LoopSession[]) {
   return new Map(
@@ -72,14 +93,11 @@ function hasAttachedTelegramNotification(session: LoopSession, notifications: Lo
   );
 }
 
-function showTelegramNotificationToast(
-  session: LoopSession,
-  preset: LoopPreset,
-  sessionRefs: Map<string, string>,
-) {
+function showTelegramNotificationToast(session: LoopSession, sessionRefs: Map<string, string>) {
   const sessionRef = sessionRefs.get(session.sessionId) ?? "C0";
-  const presetLabel = preset === "passive" ? "Passive" : "Await Reply";
-  toast.error(`[${sessionRef}] Attach a Telegram notification first to use ${presetLabel}.`);
+  toast.error(
+    `[${sessionRef}] Attach a Telegram notification from the three-dot menu before using Await Reply.`,
+  );
 }
 
 function showCompletionCheckConfigToast(
@@ -135,10 +153,10 @@ function createHomeRouteActions(args: {
       }
 
       if (
-        (pendingPreset === "await-reply" || pendingPreset === "passive") &&
+        pendingPreset === "await-reply" &&
         !hasAttachedTelegramNotification(session, args.notifications)
       ) {
-        showTelegramNotificationToast(session, pendingPreset, args.sessionRefs);
+        showTelegramNotificationToast(session, args.sessionRefs);
         return;
       }
 
@@ -146,10 +164,10 @@ function createHomeRouteActions(args: {
     },
     handleSessionPresetSelection(session: LoopSession, nextPreset: LoopPreset) {
       if (
-        (nextPreset === "await-reply" || nextPreset === "passive") &&
+        nextPreset === "await-reply" &&
         !hasAttachedTelegramNotification(session, args.notifications)
       ) {
-        showTelegramNotificationToast(session, nextPreset, args.sessionRefs);
+        showTelegramNotificationToast(session, args.sessionRefs);
         return;
       }
 
@@ -195,7 +213,11 @@ export function useHomeRouteModel() {
   const [openActionsSessionId, setOpenActionsSessionId] = useState<string | null>(null);
   const displaySessions = useMemo(
     () =>
-      sessions.filter((session) => (showArchivedSessions ? session.archived : !session.archived)),
+      sessions.filter(
+        (session) =>
+          !isHiddenSystemSession(session) &&
+          (showArchivedSessions ? session.archived : !session.archived),
+      ),
     [sessions, showArchivedSessions],
   );
   const sortedSessions = useMemo(
@@ -206,7 +228,11 @@ export function useHomeRouteModel() {
   const { pendingSessionPresets, setPendingSessionPresets } =
     usePendingSessionPresets(displaySessions);
   const now = useSessionClock();
-  const sessionRefs = useMemo(() => createSessionRefs(sessions), [sessions]);
+  const visibleSessions = useMemo(
+    () => sessions.filter((session) => !isHiddenSystemSession(session)),
+    [sessions],
+  );
+  const sessionRefs = useMemo(() => createSessionRefs(visibleSessions), [visibleSessions]);
   const actions = createHomeRouteActions({
     completionChecks,
     notifications,

@@ -4,7 +4,7 @@ function compactWhitespace(value: string) {
 
 export function deriveTelegramProjectLabel(cwd: string | null | undefined) {
   if (typeof cwd !== "string") {
-    return null;
+    return "Projectless";
   }
 
   const normalized = cwd
@@ -13,7 +13,7 @@ export function deriveTelegramProjectLabel(cwd: string | null | undefined) {
     .map((segment) => segment.trim())
     .filter(Boolean);
   if (normalized.length === 0) {
-    return null;
+    return "Projectless";
   }
 
   return compactWhitespace(normalized[normalized.length - 1] ?? "");
@@ -24,10 +24,10 @@ export function formatTelegramSessionLabel(input: {
   sessionRef?: string | null;
   title?: string | null;
 }) {
-  const segments: string[] = [];
+  const firstLineSegments: string[] = [];
   const projectLabel = deriveTelegramProjectLabel(input.cwd ?? null);
   if (projectLabel) {
-    segments.push(`[${projectLabel}]`);
+    firstLineSegments.push(`[${projectLabel}]`);
   }
 
   const sessionRef =
@@ -35,18 +35,33 @@ export function formatTelegramSessionLabel(input: {
       ? input.sessionRef.trim().toUpperCase()
       : null;
   if (sessionRef) {
-    segments.push(`[${sessionRef}]`);
+    firstLineSegments.push(`[${sessionRef}]`);
   }
 
   const title =
     typeof input.title === "string" && input.title.trim().length > 0
-      ? compactWhitespace(input.title)
+      ? `Thread: ${compactWhitespace(input.title)}`
       : null;
-  if (title) {
-    segments.push(title);
+
+  const lines = [firstLineSegments.join(" "), title].filter(
+    (line): line is string => typeof line === "string" && line.length > 0,
+  );
+
+  return lines.join("\n");
+}
+
+function appendTelegramChunkLabel(header: string, chunkLabel: string | null) {
+  if (!chunkLabel) {
+    return header;
   }
 
-  return segments.join(" ");
+  const [firstLine, ...restLines] = header.split("\n");
+  const labeledFirstLine =
+    typeof firstLine === "string" && firstLine.length > 0
+      ? `${firstLine} ${chunkLabel}`
+      : chunkLabel;
+
+  return [labeledFirstLine, ...restLines].join("\n");
 }
 
 export function normalizeTelegramOutputText(message: string | null | undefined) {
@@ -82,11 +97,6 @@ function buildTelegramNotificationFooter(
   const segments: string[] = [];
   if (preset === "await-reply" || preset === "completion-checks") {
     segments.push("---------", telegramNotificationFooter);
-  } else if (preset === "passive") {
-    segments.push(
-      "---------",
-      "Reply to this message in Telegram to queue the next prompt for this Codex chat.",
-    );
   } else if (
     preset === "infinite" ||
     preset === "max-turns-1" ||
@@ -147,10 +157,11 @@ export function buildTelegramNotificationChunks(input: {
   telegramNotificationFooter: string;
   maxLength: number;
 }) {
+  const title = compactWhitespace(input.sessionTitle ?? "");
   const header = formatTelegramSessionLabel({
     cwd: input.cwd ?? null,
     sessionRef: input.sessionRef ?? null,
-    title: input.sessionTitle ?? null,
+    title,
   });
   const body = normalizeTelegramOutputText(input.message ?? "");
   if (body.length === 0) {
@@ -179,12 +190,16 @@ export function buildTelegramNotificationChunks(input: {
 
     if (index === 0) {
       if (header) {
-        segments.push(chunkLabel ? `${header} ${chunkLabel}` : header);
+        segments.push(appendTelegramChunkLabel(header, chunkLabel));
       } else if (chunkLabel) {
         segments.push(chunkLabel);
       }
     } else if (chunkLabel) {
       segments.push(chunkLabel);
+    }
+
+    if (index === 0 && header) {
+      segments.push("---------");
     }
 
     segments.push(chunk);
@@ -220,6 +235,7 @@ export const TELEGRAM_OUTPUT_HOOK_SOURCE = [
   compactWhitespace,
   deriveTelegramProjectLabel,
   formatTelegramSessionLabel,
+  appendTelegramChunkLabel,
   normalizeTelegramOutputText,
   buildTelegramNotificationFooter,
   splitTelegramMessageChunk,

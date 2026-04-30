@@ -1,6 +1,5 @@
 import { type Database } from "bun:sqlite";
 import type { LoopPreset, LoopSession } from "../shared/app-rpc";
-import type { PassiveWakeInput, PassiveWakeResult } from "./codex-app-server-client";
 import {
   isPersistentPromptPreset,
   normalizeLoopPreset,
@@ -11,7 +10,6 @@ import {
   buildTelegramPromptReceivedText,
   getTelegramRemotePromptDeliveryMode,
 } from "./telegram-control";
-import { tryPassiveSimpleWake } from "./passive-simple-wake";
 import type { TelegramInboundMessage } from "./telegram-utils";
 
 export type TelegramBridgeTargetSession = {
@@ -20,6 +18,50 @@ export type TelegramBridgeTargetSession = {
   cwd?: string | null;
   title: string | null;
 };
+
+export type TelegramSessionBridgeStates = {
+  awaitingReplySessionIds: Set<string>;
+  queuedPromptSessionIds: Set<string>;
+};
+
+export function getTelegramSessionBridgeStates(
+  db: Database,
+  botToken: string,
+  chatId: string,
+): TelegramSessionBridgeStates {
+  const awaitingRows = db
+    .query(
+      `select ar.thread_id as session_id
+      from session_awaiting_replies ar
+      inner join sessions s on s.thread_id = ar.thread_id
+      where ar.bot_token = ?
+        and ar.chat_id = ?
+        and s.archived = 0`,
+    )
+    .all(botToken, chatId) as Array<{ session_id?: string }>;
+  const queuedRows = db
+    .query(
+      `select distinct rp.thread_id as session_id
+      from session_remote_prompts rp
+      inner join sessions s on s.thread_id = rp.thread_id
+      where rp.source = 'telegram'
+        and s.archived = 0`,
+    )
+    .all() as Array<{ session_id?: string }>;
+
+  return {
+    awaitingReplySessionIds: new Set(
+      awaitingRows.flatMap((row) =>
+        typeof row.session_id === "string" && row.session_id.length > 0 ? [row.session_id] : [],
+      ),
+    ),
+    queuedPromptSessionIds: new Set(
+      queuedRows.flatMap((row) =>
+        typeof row.session_id === "string" && row.session_id.length > 0 ? [row.session_id] : [],
+      ),
+    ),
+  };
+}
 
 export function listRegisteredTelegramSessions(
   db: Database,
@@ -176,34 +218,23 @@ export function findLatestAwaitingTelegramSessionId(
   return typeof row?.session_id === "string" && row.session_id.length > 0 ? row.session_id : null;
 }
 
-export function findLatestPassiveTelegramReceiptSessionIdBeforeMessage(
+export function findLatestDeliveredTelegramSessionId(
   db: Database,
   botToken: string,
   chatId: string,
-  messageId: number,
 ) {
   const row = db
     .query(
       `select r.thread_id as session_id
       from telegram_delivery_receipts r
       inner join sessions s on s.thread_id = r.thread_id
-      left join settings st on st.id = 1
       where r.bot_token = ?
         and r.chat_id = ?
-        and r.telegram_message_id < ?
         and s.archived = 0
-        and (
-          s.preset = 'passive'
-          or (
-            s.preset is null
-            and s.preset_overridden = 0
-            and st.global_preset = 'passive'
-          )
-        )
-      order by r.telegram_message_id desc, r.created_at desc
+      order by r.created_at desc, r.telegram_message_id desc
       limit 1`,
     )
-    .get(botToken, chatId, messageId) as { session_id?: string } | null;
+    .get(botToken, chatId) as { session_id?: string } | null;
 
   return typeof row?.session_id === "string" && row.session_id.length > 0 ? row.session_id : null;
 }
@@ -298,7 +329,7 @@ export function clearRemotePromptStateForPreset(
       db.query("delete from session_remote_prompts where thread_id = ?").run(sessionId);
       return;
     }
-    if (preset === "await-reply" || preset === "passive") {
+    if (preset === "await-reply") {
       db.query(
         "delete from session_remote_prompts where thread_id = ? and delivery_mode = 'persistent'",
       ).run(sessionId);
@@ -432,114 +463,6 @@ export function upsertSessionRemotePrompt(
   );
 
   return true;
-}
-
-function upsertPassiveThreadRemotePrompt(
-  db: Database,
-  threadId: string,
-  promptText: string,
-  message: TelegramInboundMessage,
-) {
-  const trimmedPrompt = promptText.trim();
-  if (trimmedPrompt.length === 0) {
-    return false;
-  }
-
-  db.query(
-    `insert into session_remote_prompts (
-      thread_id,
-      source,
-      delivery_mode,
-      prompt_text,
-      telegram_chat_id,
-      telegram_message_id,
-      created_at
-    ) values (?, 'telegram', 'once', ?, ?, ?, ?)
-    on conflict(thread_id, delivery_mode) do update set
-      source = excluded.source,
-      delivery_mode = excluded.delivery_mode,
-      prompt_text = excluded.prompt_text,
-      telegram_chat_id = excluded.telegram_chat_id,
-      telegram_message_id = excluded.telegram_message_id,
-      created_at = excluded.created_at`,
-  ).run(
-    threadId,
-    trimmedPrompt,
-    typeof message.chat?.id === "number" || typeof message.chat?.id === "string"
-      ? String(message.chat.id)
-      : null,
-    typeof message.message_id === "number" ? message.message_id : null,
-    nowIsoString(),
-  );
-
-  return true;
-}
-
-function passiveWakeUnavailableUntilLiveUiSync(): PassiveWakeResult {
-  return {
-    status: "unavailable",
-    reason: "codex-app-live-ui-sync-unavailable",
-  };
-}
-
-export async function handlePassiveReplyCommand(input: {
-  db: Database;
-  targetSession: TelegramBridgeTargetSession;
-  promptText: string;
-  message: TelegramInboundMessage;
-  wake?: (input: PassiveWakeInput) => Promise<PassiveWakeResult>;
-}) {
-  upsertPassiveThreadRemotePrompt(
-    input.db,
-    input.targetSession.sessionId,
-    input.promptText,
-    input.message,
-  );
-
-  const wake = input.wake ?? (() => Promise.resolve(passiveWakeUnavailableUntilLiveUiSync()));
-  const result = await tryPassiveSimpleWake({
-    db: input.db,
-    threadId: input.targetSession.sessionId,
-    cwd: input.targetSession.cwd ?? null,
-    sessionRef: input.targetSession.sessionRef,
-    threadName: input.targetSession.title ?? null,
-    promptText: input.promptText,
-    wake,
-  });
-
-  return {
-    ackText: result.ackText,
-  };
-}
-
-export async function handlePassiveReplyDelivery(input: {
-  db: Database;
-  targetSession: TelegramBridgeTargetSession;
-  promptText: string;
-  message: TelegramInboundMessage;
-  wake?: (input: PassiveWakeInput) => Promise<PassiveWakeResult>;
-}) {
-  upsertPassiveThreadRemotePrompt(
-    input.db,
-    input.targetSession.sessionId,
-    input.promptText,
-    input.message,
-  );
-
-  const wake = input.wake ?? (() => Promise.resolve(passiveWakeUnavailableUntilLiveUiSync()));
-  const result = await tryPassiveSimpleWake({
-    db: input.db,
-    threadId: input.targetSession.sessionId,
-    cwd: input.targetSession.cwd ?? null,
-    sessionRef: input.targetSession.sessionRef,
-    threadName: input.targetSession.title ?? null,
-    promptText: input.promptText,
-    wake,
-  });
-
-  return {
-    ackText: result.ackText,
-  };
 }
 
 export function buildReplyQueuedAck(

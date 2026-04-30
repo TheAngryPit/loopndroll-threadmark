@@ -36,18 +36,28 @@ describe("formatTelegramSessionLabel", () => {
   test("includes project, session ref and title when available", () => {
     expect(
       formatTelegramSessionLabel({
-        cwd: "/Users/vitorcepedalopes/Documents/ChiefOfStaff",
+        cwd: "/Users/example/Documents/ChiefOfStaff",
         sessionRef: "c12",
         title: "Fix bridge",
       }),
-    ).toBe("[ChiefOfStaff] [C12] Fix bridge");
+    ).toBe("[ChiefOfStaff] [C12]\nThread: Fix bridge");
+  });
+
+  test("marks chats without cwd as projectless", () => {
+    expect(
+      formatTelegramSessionLabel({
+        cwd: null,
+        sessionRef: "c9",
+        title: "Untitled thread",
+      }),
+    ).toBe("[Projectless] [C9]\nThread: Untitled thread");
   });
 });
 
 describe("buildTelegramNotificationChunks", () => {
   test("keeps footer only on the last chunk and adds numbering", () => {
     const chunks = buildTelegramNotificationChunks({
-      cwd: "/Users/vitorcepedalopes/Documents/ChiefOfStaff",
+      cwd: "/Users/example/Documents/ChiefOfStaff",
       sessionRef: "C7",
       sessionTitle: "Long report",
       message: Array.from({ length: 140 }, () => "paragraph content").join(" "),
@@ -57,7 +67,8 @@ describe("buildTelegramNotificationChunks", () => {
     });
 
     expect(chunks.length).toBeGreaterThan(1);
-    expect(chunks[0]).toContain("[ChiefOfStaff] [C7] Long report (1/");
+    expect(chunks[0]).toContain("[ChiefOfStaff] [C7] (1/");
+    expect(chunks[0]).toContain("Thread: Long report\n\n---------\n\nparagraph content");
     expect(chunks[1]).toContain("(2/");
     expect(chunks.at(-1)).toContain(
       "Reply to this message in Telegram to continue this Codex chat.",
@@ -68,21 +79,19 @@ describe("buildTelegramNotificationChunks", () => {
     expect(chunks.every((chunk) => chunk.length <= 220)).toBe(true);
   });
 
-  test("uses passive-mode footer wording for queued replies", () => {
+  test("does not derive header context from the outgoing assistant message", () => {
     const chunks = buildTelegramNotificationChunks({
-      cwd: "/Users/vitorcepedalopes/Documents/ChiefOfStaff",
+      cwd: null,
       sessionRef: "C8",
-      sessionTitle: "Passive report",
-      message: "Short body",
-      preset: "passive",
+      sessionTitle: "Fix hook",
+      message: ["Fix hook", "", "The typecheck is failing in hook-management.ts"].join("\n"),
+      preset: "await-reply",
       telegramNotificationFooter: "Reply to this message in Telegram to continue this Codex chat.",
       maxLength: 4096,
     });
 
     expect(chunks).toHaveLength(1);
-    expect(chunks[0]).toContain(
-      "Reply to this message in Telegram to queue the next prompt for this Codex chat.",
-    );
-    expect(chunks[0]).toContain("Or send /reply C8 your message.");
+    expect(chunks[0]).toContain("[Projectless] [C8]\nThread: Fix hook\n\n---------");
+    expect(chunks[0]).not.toContain("Context:");
   });
 });

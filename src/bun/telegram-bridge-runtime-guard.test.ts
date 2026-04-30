@@ -13,16 +13,16 @@ describe("telegram bridge await-reply runtime guard", () => {
 
   test("keeps the received acknowledgement contract for await-reply /reply fallback", () => {
     const targetSession = {
-      cwd: "/Users/vitorcepedalopes/Documents/ChiefOfStaff",
+      cwd: "/Users/example/Documents/ChiefOfStaff",
       sessionRef: "c22",
       title: "Fix bridge",
     };
 
     expect(buildTelegramPromptReceivedText(targetSession)).toBe(
-      "Received for [ChiefOfStaff] [C22] Fix bridge.",
+      ["Reply queued for next Codex stop", "[ChiefOfStaff] [C22]", "Thread: Fix bridge"].join("\n"),
     );
     expect(buildTelegramWorkingAckText(targetSession)).toBe(
-      "Working on [ChiefOfStaff] [C22] Fix bridge.",
+      ["Reply delivered to Codex", "[ChiefOfStaff] [C22]", "Thread: Fix bridge"].join("\n"),
     );
   });
 });

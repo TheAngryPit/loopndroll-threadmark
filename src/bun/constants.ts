@@ -17,7 +17,6 @@ export const LOOP_SCOPE_VALUES = ["global", "per-task"] as const satisfies reado
 export const LOOP_PRESET_VALUES = [
   "infinite",
   "await-reply",
-  "passive",
   "completion-checks",
   "max-turns-1",
   "max-turns-2",

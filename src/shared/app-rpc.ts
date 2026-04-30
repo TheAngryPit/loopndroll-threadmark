@@ -76,7 +76,6 @@ export type HookRemovalWatcherStatus = {
 export type LoopPreset =
   | "infinite"
   | "await-reply"
-  | "passive"
   | "completion-checks"
   | "max-turns-1"
   | "max-turns-2"
@@ -173,6 +172,7 @@ export type LoopndrollSnapshot = {
   globalCompletionCheckId: string | null;
   globalCompletionCheckWaitForReply: boolean;
   hooksAutoRegistration: boolean;
+  mirrorEnabled: boolean;
   notifications: LoopNotification[];
   completionChecks: CompletionCheck[];
   health: {
@@ -261,6 +261,10 @@ export type AppRpcSchema = {
         };
         response: LoopndrollSnapshot;
       };
+      migrateNotificationSecretsToKeychain: {
+        params: undefined;
+        response: LoopndrollSnapshot;
+      };
       updateCompletionCheck: {
         params: {
           completionCheck: {
@@ -312,6 +316,12 @@ export type AppRpcSchema = {
         params: {
           completionCheckId: string | null;
           waitForReplyAfterCompletion: boolean;
+        };
+        response: LoopndrollSnapshot;
+      };
+      setMirrorEnabled: {
+        params: {
+          enabled: boolean;
         };
         response: LoopndrollSnapshot;
       };

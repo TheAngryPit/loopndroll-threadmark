@@ -44,6 +44,11 @@ type AppRpc = {
     updateNotification: (
       params: AppRpcSchema["bun"]["requests"]["updateNotification"]["params"],
     ) => Promise<AppRpcSchema["bun"]["requests"]["updateNotification"]["response"]>;
+    migrateNotificationSecretsToKeychain: AppRpcSchema["bun"]["requests"]["migrateNotificationSecretsToKeychain"]["params"] extends undefined
+      ? () => Promise<
+          AppRpcSchema["bun"]["requests"]["migrateNotificationSecretsToKeychain"]["response"]
+        >
+      : never;
     updateCompletionCheck: (
       params: AppRpcSchema["bun"]["requests"]["updateCompletionCheck"]["params"],
     ) => Promise<AppRpcSchema["bun"]["requests"]["updateCompletionCheck"]["response"]>;
@@ -68,6 +73,9 @@ type AppRpc = {
     setGlobalCompletionCheckConfig: (
       params: AppRpcSchema["bun"]["requests"]["setGlobalCompletionCheckConfig"]["params"],
     ) => Promise<AppRpcSchema["bun"]["requests"]["setGlobalCompletionCheckConfig"]["response"]>;
+    setMirrorEnabled: (
+      params: AppRpcSchema["bun"]["requests"]["setMirrorEnabled"]["params"],
+    ) => Promise<AppRpcSchema["bun"]["requests"]["setMirrorEnabled"]["response"]>;
     setSessionPreset: (
       params: AppRpcSchema["bun"]["requests"]["setSessionPreset"]["params"],
     ) => Promise<AppRpcSchema["bun"]["requests"]["setSessionPreset"]["response"]>;

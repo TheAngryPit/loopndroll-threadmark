@@ -19,6 +19,7 @@ async function createTestPaths() {
     databasePath: join(appDirectoryPath, "app.db"),
     managedHookPath: join(appDirectoryPath, "bin", "loopndroll-hook"),
     hookRemovalWatchLockPath: join(appDirectoryPath, "state", "hook-removal-watch.lock"),
+    startupRecoveryMarkerPath: join(appDirectoryPath, "state", "startup-runtime.marker.json"),
     hookDebugLogPath: join(appDirectoryPath, "logs", "hooks-debug.jsonl"),
     codexDirectoryPath: join(appDirectoryPath, ".codex"),
     codexConfigPath: join(appDirectoryPath, ".codex", "config.toml"),

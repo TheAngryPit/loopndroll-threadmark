@@ -19,8 +19,8 @@ const canonicalThreadSession = {
   completionCheckWaitForReply: false,
   effectiveCompletionCheckId: null,
   effectiveCompletionCheckWaitForReply: false,
-  threadName: "Fix passive wake",
-  title: "Fix passive wake",
+  threadName: "Fix hook lifecycle",
+  title: "Fix hook lifecycle",
   transcriptPath: null,
   lastAssistantMessage: null,
 } satisfies LoopSession;

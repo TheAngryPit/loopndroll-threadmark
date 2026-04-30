@@ -68,6 +68,11 @@ export async function updateNotification(notification: UpdateLoopNotificationInp
   return rpc?.request.updateNotification({ notification });
 }
 
+export async function migrateNotificationSecretsToKeychain() {
+  const rpc = await getAppRpc();
+  return rpc?.request.migrateNotificationSecretsToKeychain();
+}
+
 export async function updateCompletionCheck(completionCheck: {
   id: string;
   label?: string;
@@ -116,6 +121,11 @@ export async function setGlobalCompletionCheckConfig(
     completionCheckId,
     waitForReplyAfterCompletion,
   });
+}
+
+export async function setMirrorEnabled(enabled: boolean) {
+  const rpc = await getAppRpc();
+  return rpc?.request.setMirrorEnabled({ enabled });
 }
 
 export async function setSessionPreset(sessionId: string, preset: LoopPreset | null) {

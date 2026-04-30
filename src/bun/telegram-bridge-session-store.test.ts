@@ -5,8 +5,9 @@ import {
   disableAllTelegramSessionsViaFailsafe,
   disableTelegramSessionViaFailsafe,
   findLatestAwaitingTelegramSessionId,
-  findLatestPassiveTelegramReceiptSessionIdBeforeMessage,
+  findLatestDeliveredTelegramSessionId,
   findTelegramSessionByRef,
+  getTelegramSessionBridgeStates,
   listRegisteredTelegramSessions,
 } from "./telegram-bridge-session-store";
 
@@ -94,8 +95,8 @@ function insertFailsafeFixtureSessions(db: Database) {
       preset_overridden,
       archived
     ) values
-      ('thr_target', 'C12', '/tmp/project', 'Target', null, null, '2026-04-23T10:00:00.000Z', '2026-04-23T10:00:00.000Z', '2026-04-23T10:00:00.000Z', 'passive', 1, 0),
-      ('thr_other', 'C13', '/tmp/project', 'Other', null, null, '2026-04-23T11:00:00.000Z', '2026-04-23T11:00:00.000Z', '2026-04-23T11:00:00.000Z', 'passive', 1, 0)`,
+      ('thr_target', 'C12', '/tmp/project', 'Target', null, null, '2026-04-23T10:00:00.000Z', '2026-04-23T10:00:00.000Z', '2026-04-23T10:00:00.000Z', 'await-reply', 1, 0),
+      ('thr_other', 'C13', '/tmp/project', 'Other', null, null, '2026-04-23T11:00:00.000Z', '2026-04-23T11:00:00.000Z', '2026-04-23T11:00:00.000Z', 'await-reply', 1, 0)`,
   ).run();
 }
 
@@ -139,7 +140,7 @@ describe("telegram bridge session store", () => {
         preset,
         preset_overridden,
         archived
-      ) values (?, 'C22', '/tmp/project', 'Fix passive wake', null, null, ?, ?, null, 'passive', 0, 0)`,
+      ) values (?, 'C22', '/tmp/project', 'Fix hook lifecycle', null, null, ?, ?, null, 'await-reply', 0, 0)`,
     ).run("thr_123", "2026-04-23T10:00:00.000Z", "2026-04-23T10:00:00.000Z");
     db.query(
       "insert into session_notifications (thread_id, notification_id) values ('thr_123', 'n1')",
@@ -152,15 +153,15 @@ describe("telegram bridge session store", () => {
       sessionId: "thr_123",
       sessionRef: "C22",
       cwd: "/tmp/project",
-      title: "Fix passive wake",
-      effectivePreset: "passive",
+      title: "Fix hook lifecycle",
+      effectivePreset: "await-reply",
     });
 
     expect(findTelegramSessionByRef(db, "bot", "chat", "c22")).toEqual({
       sessionId: "thr_123",
       sessionRef: "C22",
       cwd: "/tmp/project",
-      title: "Fix passive wake",
+      title: "Fix hook lifecycle",
     });
   });
 
@@ -196,6 +197,49 @@ describe("telegram bridge session store", () => {
   });
 });
 
+describe("telegram bridge loose reply fallback", () => {
+  test("finds the latest delivered Telegram session for loose replies", () => {
+    const db = new Database(":memory:");
+    createTelegramBridgeSchema(db);
+
+    db.query(
+      `insert into sessions (
+        thread_id,
+        session_ref,
+        cwd,
+        thread_name,
+        transcript_path,
+        last_assistant_message,
+        first_seen_at,
+        last_seen_at,
+        active_since,
+        preset,
+        preset_overridden,
+        archived
+      ) values
+        ('thr_old', 'C11', '/tmp/project', 'Old', null, null, '2026-04-23T09:00:00.000Z', '2026-04-23T09:00:00.000Z', null, 'await-reply', 1, 0),
+        ('thr_new', 'C12', '/tmp/project', 'New', null, null, '2026-04-23T10:00:00.000Z', '2026-04-23T10:00:00.000Z', null, 'await-reply', 1, 0),
+        ('thr_archived', 'C13', '/tmp/project', 'Archived', null, null, '2026-04-23T11:00:00.000Z', '2026-04-23T11:00:00.000Z', null, 'await-reply', 1, 1)`,
+    ).run();
+    db.query(
+      `insert into telegram_delivery_receipts (
+        id,
+        notification_id,
+        thread_id,
+        bot_token,
+        chat_id,
+        telegram_message_id,
+        created_at
+      ) values
+        ('r_old', 'n1', 'thr_old', 'bot', 'chat', 10, '2026-04-23T09:00:00.000Z'),
+        ('r_new', 'n1', 'thr_new', 'bot', 'chat', 11, '2026-04-23T10:00:00.000Z'),
+        ('r_archived', 'n1', 'thr_archived', 'bot', 'chat', 12, '2026-04-23T11:00:00.000Z')`,
+    ).run();
+
+    expect(findLatestDeliveredTelegramSessionId(db, "bot", "chat")).toBe("thr_new");
+  });
+});
+
 describe("telegram bridge failsafe", () => {
   test("disables one session and clears only that session's pending remote state", () => {
     const db = new Database(":memory:");
@@ -222,16 +266,16 @@ describe("telegram bridge failsafe", () => {
       count: 1,
     });
     expect(
-      db.query("select prompt_text from session_remote_prompts where thread_id = ?").get(
-        "thr_other",
-      ),
+      db
+        .query("select prompt_text from session_remote_prompts where thread_id = ?")
+        .get("thr_other"),
     ).toEqual({ prompt_text: "other prompt" });
   });
 
   test("disables global and every active session while clearing pending remote state", () => {
     const db = new Database(":memory:");
     createTelegramBridgeSchema(db);
-    db.query("update settings set global_preset = 'passive' where id = 1").run();
+    db.query("update settings set global_preset = 'await-reply' where id = 1").run();
     insertFailsafeFixtureSessions(db);
     insertFailsafeFixtureRemoteState(db);
 
@@ -257,134 +301,18 @@ describe("telegram bridge failsafe", () => {
   });
 });
 
-describe("telegram bridge loose-message targeting", () => {
-  test("finds the latest passive notification before a loose Telegram message", () => {
+describe("telegram bridge status states", () => {
+  test("reports awaiting replies and queued Telegram prompts for status output", () => {
     const db = new Database(":memory:");
     createTelegramBridgeSchema(db);
+    insertFailsafeFixtureSessions(db);
+    insertFailsafeFixtureRemoteState(db);
 
-    db.query(
-      `insert into sessions (
-        thread_id,
-        session_ref,
-        cwd,
-        thread_name,
-        transcript_path,
-        last_assistant_message,
-        first_seen_at,
-        last_seen_at,
-        active_since,
-        preset,
-        preset_overridden,
-        archived
-      ) values
-        ('thr_old', 'C11', '/tmp/project', 'Old passive', null, null, '2026-04-23T09:00:00.000Z', '2026-04-23T09:00:00.000Z', null, 'passive', 1, 0),
-        ('thr_off', 'C12', '/tmp/project', 'Off', null, null, '2026-04-23T10:00:00.000Z', '2026-04-23T10:00:00.000Z', null, null, 1, 0),
-        ('thr_new', 'C13', '/tmp/project', 'New passive', null, null, '2026-04-23T11:00:00.000Z', '2026-04-23T11:00:00.000Z', null, 'passive', 1, 0),
-        ('thr_future', 'C14', '/tmp/project', 'Future passive', null, null, '2026-04-23T12:00:00.000Z', '2026-04-23T12:00:00.000Z', null, 'passive', 1, 0)`,
-    ).run();
-    db.query(
-      `insert into telegram_delivery_receipts (
-        id,
-        notification_id,
-        thread_id,
-        bot_token,
-        chat_id,
-        telegram_message_id,
-        created_at
-      ) values
-        ('r_old', null, 'thr_old', 'bot', 'chat', 10, '2026-04-23T09:01:00.000Z'),
-        ('r_off', null, 'thr_off', 'bot', 'chat', 11, '2026-04-23T10:01:00.000Z'),
-        ('r_new', null, 'thr_new', 'bot', 'chat', 12, '2026-04-23T11:01:00.000Z'),
-        ('r_future', null, 'thr_future', 'bot', 'chat', 14, '2026-04-23T12:01:00.000Z')`,
-    ).run();
+    const states = getTelegramSessionBridgeStates(db, "bot", "chat");
 
-    expect(findLatestPassiveTelegramReceiptSessionIdBeforeMessage(db, "bot", "chat", 13)).toBe(
-      "thr_new",
-    );
-  });
-
-  test("uses inherited global passive mode for loose Telegram message targeting", () => {
-    const db = new Database(":memory:");
-    createTelegramBridgeSchema(db);
-    db.query("update settings set global_preset = 'passive' where id = 1").run();
-
-    db.query(
-      `insert into sessions (
-        thread_id,
-        session_ref,
-        cwd,
-        thread_name,
-        transcript_path,
-        last_assistant_message,
-        first_seen_at,
-        last_seen_at,
-        active_since,
-        preset,
-        preset_overridden,
-        archived
-      ) values
-        ('thr_inherited', 'C12', '/tmp/project', 'Inherited passive', null, null, '2026-04-23T10:00:00.000Z', '2026-04-23T10:00:00.000Z', null, null, 0, 0),
-        ('thr_opted_out', 'C13', '/tmp/project', 'Opted out', null, null, '2026-04-23T11:00:00.000Z', '2026-04-23T11:00:00.000Z', null, null, 1, 0)`,
-    ).run();
-    db.query(
-      `insert into telegram_delivery_receipts (
-        id,
-        notification_id,
-        thread_id,
-        bot_token,
-        chat_id,
-        telegram_message_id,
-        created_at
-      ) values
-        ('r_inherited', null, 'thr_inherited', 'bot', 'chat', 11, '2026-04-23T10:01:00.000Z'),
-        ('r_opted_out', null, 'thr_opted_out', 'bot', 'chat', 12, '2026-04-23T11:01:00.000Z')`,
-    ).run();
-
-    expect(findLatestPassiveTelegramReceiptSessionIdBeforeMessage(db, "bot", "chat", 13)).toBe(
-      "thr_inherited",
-    );
-  });
-});
-
-describe("telegram bridge passive-only loose-message targeting", () => {
-  test("does not target non-passive receipts for loose Telegram messages", () => {
-    const db = new Database(":memory:");
-    createTelegramBridgeSchema(db);
-
-    db.query(
-      `insert into sessions (
-        thread_id,
-        session_ref,
-        cwd,
-        thread_name,
-        transcript_path,
-        last_assistant_message,
-        first_seen_at,
-        last_seen_at,
-        active_since,
-        preset,
-        preset_overridden,
-        archived
-      ) values
-        ('thr_await', 'C12', '/tmp/project', 'Await reply', null, null, '2026-04-23T10:00:00.000Z', '2026-04-23T10:00:00.000Z', null, 'await-reply', 1, 0),
-        ('thr_infinite', 'C13', '/tmp/project', 'Infinite', null, null, '2026-04-23T11:00:00.000Z', '2026-04-23T11:00:00.000Z', null, 'infinite', 1, 0)`,
-    ).run();
-    db.query(
-      `insert into telegram_delivery_receipts (
-        id,
-        notification_id,
-        thread_id,
-        bot_token,
-        chat_id,
-        telegram_message_id,
-        created_at
-      ) values
-        ('r_await', null, 'thr_await', 'bot', 'chat', 11, '2026-04-23T10:01:00.000Z'),
-        ('r_infinite', null, 'thr_infinite', 'bot', 'chat', 12, '2026-04-23T11:01:00.000Z')`,
-    ).run();
-
-    expect(
-      findLatestPassiveTelegramReceiptSessionIdBeforeMessage(db, "bot", "chat", 13),
-    ).toBeNull();
+    expect(states.awaitingReplySessionIds.has("thr_target")).toBe(true);
+    expect(states.awaitingReplySessionIds.has("thr_other")).toBe(true);
+    expect(states.queuedPromptSessionIds.has("thr_target")).toBe(true);
+    expect(states.queuedPromptSessionIds.has("thr_other")).toBe(true);
   });
 });

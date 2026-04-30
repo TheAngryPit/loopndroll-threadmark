@@ -1,5 +1,6 @@
 export { getTelegramChats } from "./telegram-utils";
 export { startLoopndrollTelegramBridge } from "./telegram-bridge";
+export { clearStartupRecoveryMarker, resetActiveLoopStateOnStartup } from "./startup-recovery";
 export {
   clearHooks,
   ensureLoopndrollSetup,
@@ -18,10 +19,12 @@ export {
   deleteCompletionCheck,
   deleteLoopNotification,
   deleteSession,
+  migrateNotificationSecretsToKeychain,
   saveDefaultPrompt,
   setGlobalCompletionCheckConfig,
   setGlobalNotification,
   setGlobalPreset,
+  setMirrorEnabled,
   setLoopScope,
   setSessionArchived,
   setSessionCompletionCheckConfig,

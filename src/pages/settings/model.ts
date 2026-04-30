@@ -429,6 +429,26 @@ function createDialogOpeners(args: {
       args.setTelegramChatsError(null);
       args.setIsNotificationDialogOpen(true);
     },
+    openCreateTelegramNotificationDialog() {
+      args.setEditingNotificationId(null);
+      args.notificationForm.reset({
+        ...createEmptyNotificationValues(),
+        channel: "telegram",
+      });
+      args.setTelegramChats([]);
+      args.setTelegramChatsError(null);
+      args.setIsNotificationDialogOpen(true);
+    },
+    openCreateSlackNotificationDialog() {
+      args.setEditingNotificationId(null);
+      args.notificationForm.reset({
+        ...createEmptyNotificationValues(),
+        channel: "slack",
+      });
+      args.setTelegramChats([]);
+      args.setTelegramChatsError(null);
+      args.setIsNotificationDialogOpen(true);
+    },
     openCreateCompletionCheckDialog() {
       args.setEditingCompletionCheckId(null);
       args.completionCheckForm.reset(createEmptyCompletionCheckValues());
@@ -510,8 +530,10 @@ function createSettingsRouteModelResult(args: {
     editingNotificationId: args.dialogState.editingNotificationId,
     hasResolvedHookState: !args.loopndrollState.isLoading && args.loopndrollState.snapshot !== null,
     hookLifecycle: args.loopndrollState.snapshot?.hookLifecycle ?? null,
+    hookIssues: args.loopndrollState.snapshot?.health.issues ?? [],
     hookRemovalWatcher: args.loopndrollState.snapshot?.health.hookRemovalWatcher ?? null,
     hooksDetected: args.loopndrollState.snapshot?.health.registered ?? false,
+    mirrorEnabled: args.loopndrollState.snapshot?.mirrorEnabled ?? false,
     runtimeState: args.loopndrollState.snapshot?.runtimeState ?? "running",
     isCompletionCheckDialogOpen: args.dialogState.isCompletionCheckDialogOpen,
     isLoadingTelegramChats: args.dialogState.isLoadingTelegramChats,

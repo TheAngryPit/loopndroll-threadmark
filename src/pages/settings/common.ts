@@ -3,6 +3,9 @@ import { z } from "zod/v4";
 import { openExternalUrl, type LoopNotification, type TelegramChatOption } from "@/lib/loopndroll";
 import { validateTelegramNotificationChatId } from "@/shared/telegram-chat-policy";
 
+export const TELEGRAM_BOT_TOKEN_KEYCHAIN_REF_PREFIX = "keychain://loopndroll/telegram-bot-token/";
+export const SLACK_WEBHOOK_URL_KEYCHAIN_REF_PREFIX = "keychain://loopndroll/slack-webhook-url/";
+
 export const settingsSchema = z.object({
   defaultPrompt: z
     .string()
@@ -32,7 +35,9 @@ export const notificationSchema = z
         return;
       }
 
-      if (!z.string().url().safeParse(values.webhookUrl.trim()).success) {
+      const webhookUrl = values.webhookUrl.trim();
+      const isKeychainRef = webhookUrl.startsWith(SLACK_WEBHOOK_URL_KEYCHAIN_REF_PREFIX);
+      if (!isKeychainRef && !z.string().url().safeParse(webhookUrl).success) {
         context.addIssue({
           code: "custom",
           message: "Webhook URL must be a valid URL.",

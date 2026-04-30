@@ -82,7 +82,7 @@ function TelegramBotTokenField({
         <Input
           aria-invalid={Boolean(botTokenError)}
           id="notification-bot-token"
-          placeholder="123456789:AA..."
+          placeholder="<bot-id>:<bot-secret>"
           {...form.register("botToken", {
             onChange: () => {
               form.setValue("telegramChatId", "");

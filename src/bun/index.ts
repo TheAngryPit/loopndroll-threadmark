@@ -16,20 +16,24 @@ import {
   clearHooks,
   createCompletionCheck,
   createLoopNotification,
+  clearStartupRecoveryMarker,
   deleteCompletionCheck,
   deleteLoopNotification,
   ensureLoopndrollSetup,
   getTelegramChats as fetchTelegramChats,
   getLoopndrollSnapshot,
+  migrateNotificationSecretsToKeychain,
   pauseLoopndroll,
   registerHooks,
   revealHooksFile,
+  resetActiveLoopStateOnStartup,
   resumeLoopndroll,
   saveDefaultPrompt,
   deleteSession,
   setGlobalCompletionCheckConfig,
   setGlobalNotification,
   setGlobalPreset,
+  setMirrorEnabled,
   setSessionArchived as persistSessionArchived,
   setSessionCompletionCheckConfig,
   setSessionNotifications as persistSessionNotifications,
@@ -603,6 +607,7 @@ function getLoopndrollRpcRequestHandlers() {
     }) {
       return updateLoopNotification(notification);
     },
+    migrateNotificationSecretsToKeychain,
     updateCompletionCheck({
       completionCheck,
     }: {
@@ -634,6 +639,9 @@ function getLoopndrollRpcRequestHandlers() {
     }) {
       return setGlobalCompletionCheckConfig(completionCheckId, waitForReplyAfterCompletion);
     },
+    setMirrorEnabled({ enabled }: { enabled: boolean }) {
+      return setMirrorEnabled(enabled);
+    },
     ...getLoopndrollSessionRpcRequestHandlers(),
     ...getLoopndrollLifecycleRpcRequestHandlers(),
   };
@@ -653,9 +661,45 @@ function createWindowRpc() {
 
 const windowRpc = createWindowRpc();
 
+function registerStartupRecoveryCleanup() {
+  let cleaned = false;
+  let shouldClearMarker = true;
+  const cleanup = () => {
+    if (cleaned) {
+      return;
+    }
+    cleaned = true;
+    if (!shouldClearMarker) {
+      return;
+    }
+    clearStartupRecoveryMarker();
+  };
+
+  process.once("exit", cleanup);
+  process.once("SIGTERM", () => {
+    shouldClearMarker = false;
+    cleanup();
+    process.exit(0);
+  });
+  process.once("SIGINT", () => {
+    cleanup();
+    process.exit(0);
+  });
+}
+
 installApplicationMenu();
-void startHookRemovalPendingMonitor();
-startLoopndrollTelegramBridge();
+try {
+  resetActiveLoopStateOnStartup();
+  registerStartupRecoveryCleanup();
+} catch (error) {
+  console.error("Loopndroll startup active-state reset failed.", error);
+}
+if (process.env["LOOPNDROLL_DISABLE_HOOK_REMOVAL_MONITOR"] !== "1") {
+  void startHookRemovalPendingMonitor();
+}
+if (process.env["LOOPNDROLL_DISABLE_TELEGRAM_BRIDGE"] !== "1") {
+  startLoopndrollTelegramBridge();
+}
 void initializeUpdater();
 
 mainWindow = new BrowserWindow({

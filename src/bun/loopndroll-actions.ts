@@ -1,4 +1,5 @@
 import { and, asc, eq } from "drizzle-orm";
+import { readFile, writeFile } from "node:fs/promises";
 import type {
   CreateLoopNotificationInput,
   LoopPreset,
@@ -23,7 +24,7 @@ import {
   allocateNextSessionRef,
   applyGlobalNotificationToSession,
   buildNewSession,
-  buildTelegramBotUrl,
+  buildTelegramBotUrlForStorage,
   createNotification,
   getLoopndrollPaths,
   getNotificationBaseLabel,
@@ -42,6 +43,118 @@ import {
   resolveSessionPresetState,
   stringifyCompletionCheckCommands,
 } from "./loopndroll-core";
+import {
+  deleteSlackWebhookUrlFromKeychain,
+  deleteTelegramBotTokenFromKeychain,
+  isSlackWebhookUrlKeychainRef,
+  isTelegramBotTokenKeychainRef,
+  resolveSlackWebhookUrl,
+  resolveTelegramBotToken,
+  storeSlackWebhookUrlInKeychain,
+  storeTelegramBotTokenInKeychain,
+} from "./secret-store";
+
+async function redactSecretsFromManagedLogs(secrets: string[]) {
+  const redactionTargets = [...new Set(secrets.map((secret) => secret.trim()))].filter(
+    (secret) =>
+      secret.length > 0 &&
+      !isTelegramBotTokenKeychainRef(secret) &&
+      !isSlackWebhookUrlKeychainRef(secret),
+  );
+  if (redactionTargets.length === 0) {
+    return;
+  }
+
+  const { hookDebugLogPath } = getLoopndrollPaths();
+  let currentLog: string;
+  try {
+    currentLog = await readFile(hookDebugLogPath, "utf8");
+  } catch {
+    return;
+  }
+
+  let nextLog = currentLog;
+  for (const secret of redactionTargets) {
+    nextLog = nextLog.replaceAll(secret, "[redacted]");
+  }
+
+  if (nextLog !== currentLog) {
+    await writeFile(hookDebugLogPath, nextLog, "utf8");
+  }
+}
+
+function redactPersistedTelegramBotToken(
+  client: ReturnType<typeof getLoopndrollDatabase>["client"],
+  plaintextBotToken: string,
+  botTokenRef: string,
+) {
+  const oldToken = plaintextBotToken.trim();
+  const nextToken = botTokenRef.trim();
+  if (oldToken.length === 0 || oldToken === nextToken || isTelegramBotTokenKeychainRef(oldToken)) {
+    return;
+  }
+
+  client.transaction(() => {
+    client
+      .query(
+        `insert into telegram_update_cursors (bot_token, last_update_id, updated_at)
+         select ?, last_update_id, updated_at
+         from telegram_update_cursors
+         where bot_token = ?
+         on conflict(bot_token) do update set
+           last_update_id = max(telegram_update_cursors.last_update_id, excluded.last_update_id),
+           updated_at = excluded.updated_at`,
+      )
+      .run(nextToken, oldToken);
+    client.query("delete from telegram_update_cursors where bot_token = ?").run(oldToken);
+
+    client
+      .query(
+        `insert into telegram_known_chats (
+          bot_token,
+          chat_id,
+          kind,
+          username,
+          display_name,
+          updated_at
+        )
+         select ?, chat_id, kind, username, display_name, updated_at
+         from telegram_known_chats
+         where bot_token = ?
+         on conflict(bot_token, chat_id) do update set
+           kind = excluded.kind,
+           username = excluded.username,
+           display_name = excluded.display_name,
+           updated_at = excluded.updated_at`,
+      )
+      .run(nextToken, oldToken);
+    client.query("delete from telegram_known_chats where bot_token = ?").run(oldToken);
+
+    client
+      .query(
+        `insert into session_awaiting_replies (
+          thread_id,
+          bot_token,
+          chat_id,
+          turn_id,
+          started_at
+        )
+         select thread_id, ?, chat_id, turn_id, started_at
+         from session_awaiting_replies
+         where bot_token = ?
+         on conflict(thread_id, bot_token, chat_id) do update set
+           turn_id = excluded.turn_id,
+           started_at = excluded.started_at`,
+      )
+      .run(nextToken, oldToken);
+    client.query("delete from session_awaiting_replies where bot_token = ?").run(oldToken);
+
+    client
+      .query("update or ignore telegram_delivery_receipts set bot_token = ? where bot_token = ?")
+      .run(nextToken, oldToken);
+    client.query("delete from telegram_delivery_receipts where bot_token = ?").run(oldToken);
+  })();
+}
 
 export async function saveDefaultPrompt(defaultPrompt: string) {
   const paths = getLoopndrollPaths();
@@ -57,7 +170,7 @@ export async function saveDefaultPrompt(defaultPrompt: string) {
 
 export async function createLoopNotification(notification: CreateLoopNotificationInput) {
   const paths = getLoopndrollPaths();
-  const { db } = getLoopndrollDatabase(paths.databasePath);
+  const { client, db } = getLoopndrollDatabase(paths.databasePath);
   const existingNotifications = readSnapshotFromDatabase().notifications;
   if (notification.channel === "telegram") {
     const chatError = validateTelegramNotificationChatId(notification.chatId.trim());
@@ -66,6 +179,22 @@ export async function createLoopNotification(notification: CreateLoopNotificatio
     }
   }
   const nextNotification = createNotification(notification);
+  if (nextNotification.channel === "slack") {
+    const plaintextWebhookUrl = nextNotification.webhookUrl;
+    nextNotification.webhookUrl = storeSlackWebhookUrlInKeychain(
+      nextNotification.id,
+      nextNotification.webhookUrl,
+    );
+    await redactSecretsFromManagedLogs([plaintextWebhookUrl]);
+  } else {
+    const plaintextBotToken = nextNotification.botToken;
+    nextNotification.botToken = storeTelegramBotTokenInKeychain(
+      nextNotification.id,
+      nextNotification.botToken,
+    );
+    redactPersistedTelegramBotToken(client, plaintextBotToken, nextNotification.botToken);
+    await redactSecretsFromManagedLogs([plaintextBotToken]);
+  }
 
   nextNotification.label = getUniqueNotificationLabel(
     existingNotifications,
@@ -103,7 +232,7 @@ export async function createCompletionCheck(input: { label?: string; commands: s
 
 export async function updateLoopNotification(notification: UpdateLoopNotificationInput) {
   const paths = getLoopndrollPaths();
-  const { db } = getLoopndrollDatabase(paths.databasePath);
+  const { client, db } = getLoopndrollDatabase(paths.databasePath);
   if (notification.channel === "telegram") {
     const chatError = validateTelegramNotificationChatId(notification.chatId.trim());
     if (chatError) {
@@ -131,11 +260,20 @@ export async function updateLoopNotification(notification: UpdateLoopNotificatio
   );
 
   if (notification.channel === "slack") {
+    const previousWebhookUrl =
+      currentNotification.channel === "slack" ? currentNotification.webhookUrl : "";
+    if (currentNotification.channel === "telegram") {
+      deleteTelegramBotTokenFromKeychain(currentNotification.botToken);
+    }
+    const webhookUrlRef = isSlackWebhookUrlKeychainRef(notification.webhookUrl)
+      ? notification.webhookUrl.trim()
+      : storeSlackWebhookUrlInKeychain(notification.id, notification.webhookUrl);
+    await redactSecretsFromManagedLogs([notification.webhookUrl, previousWebhookUrl]);
     db.update(notifications)
       .set({
         label,
         channel: "slack",
-        webhookUrl: notification.webhookUrl.trim(),
+        webhookUrl: webhookUrlRef,
         chatId: null,
         botToken: null,
         botUrl: null,
@@ -145,14 +283,26 @@ export async function updateLoopNotification(notification: UpdateLoopNotificatio
       .where(eq(notifications.id, notification.id))
       .run();
   } else {
+    const previousBotToken =
+      currentNotification.channel === "telegram" ? currentNotification.botToken : "";
+    if (currentNotification.channel === "slack") {
+      deleteSlackWebhookUrlFromKeychain(currentNotification.webhookUrl);
+    }
+    const plaintextBotToken = notification.botToken.trim();
+    const botTokenRef = isTelegramBotTokenKeychainRef(notification.botToken)
+      ? notification.botToken.trim()
+      : storeTelegramBotTokenInKeychain(notification.id, notification.botToken);
+    redactPersistedTelegramBotToken(client, plaintextBotToken, botTokenRef);
+    redactPersistedTelegramBotToken(client, previousBotToken, botTokenRef);
+    await redactSecretsFromManagedLogs([plaintextBotToken, previousBotToken]);
     db.update(notifications)
       .set({
         label,
         channel: "telegram",
         webhookUrl: null,
         chatId: notification.chatId.trim(),
-        botToken: notification.botToken.trim(),
-        botUrl: buildTelegramBotUrl(notification.botToken.trim()),
+        botToken: botTokenRef,
+        botUrl: buildTelegramBotUrlForStorage(botTokenRef),
         chatUsername: notification.chatUsername?.trim() || null,
         chatDisplayName: notification.chatDisplayName?.trim() || null,
       })
@@ -201,6 +351,11 @@ export async function updateCompletionCheck(input: {
 export async function deleteLoopNotification(notificationId: string) {
   const paths = getLoopndrollPaths();
   const { db } = getLoopndrollDatabase(paths.databasePath);
+  const existingNotification = db
+    .select()
+    .from(notifications)
+    .where(eq(notifications.id, notificationId))
+    .get();
 
   db.transaction((tx) => {
     tx.delete(notifications).where(eq(notifications.id, notificationId)).run();
@@ -209,6 +364,67 @@ export async function deleteLoopNotification(notificationId: string) {
       .where(eq(settings.globalNotificationId, notificationId))
       .run();
   });
+  deleteTelegramBotTokenFromKeychain(existingNotification?.botToken);
+  deleteSlackWebhookUrlFromKeychain(existingNotification?.webhookUrl);
+
+  return loadSnapshot(paths);
+}
+
+export async function migrateNotificationSecretsToKeychain() {
+  const paths = getLoopndrollPaths();
+  const { client, db } = getLoopndrollDatabase(paths.databasePath);
+  const existingNotificationRows = db
+    .select()
+    .from(notifications)
+    .orderBy(asc(notifications.createdAt), asc(notifications.id))
+    .all();
+
+  for (const row of existingNotificationRows) {
+    const currentNotification = mapNotificationRow(row);
+    if (currentNotification.channel === "slack") {
+      const webhookUrl = currentNotification.webhookUrl.trim();
+      if (webhookUrl.length === 0) {
+        continue;
+      }
+
+      if (isSlackWebhookUrlKeychainRef(webhookUrl)) {
+        await redactSecretsFromManagedLogs([resolveSlackWebhookUrl(webhookUrl)]);
+        continue;
+      }
+
+      db.update(notifications)
+        .set({
+          webhookUrl: storeSlackWebhookUrlInKeychain(currentNotification.id, webhookUrl),
+        })
+        .where(eq(notifications.id, currentNotification.id))
+        .run();
+      await redactSecretsFromManagedLogs([webhookUrl]);
+      continue;
+    }
+
+    const botToken = currentNotification.botToken.trim();
+    if (botToken.length === 0) {
+      continue;
+    }
+
+    if (isTelegramBotTokenKeychainRef(botToken)) {
+      const resolvedBotToken = resolveTelegramBotToken(botToken);
+      redactPersistedTelegramBotToken(client, resolvedBotToken, botToken);
+      await redactSecretsFromManagedLogs([resolvedBotToken]);
+      continue;
+    }
+
+    const botTokenRef = storeTelegramBotTokenInKeychain(currentNotification.id, botToken);
+    redactPersistedTelegramBotToken(client, botToken, botTokenRef);
+    await redactSecretsFromManagedLogs([botToken]);
+    db.update(notifications)
+      .set({
+        botToken: botTokenRef,
+        botUrl: buildTelegramBotUrlForStorage(botTokenRef),
+      })
+      .where(eq(notifications.id, currentNotification.id))
+      .run();
+  }
 
   return loadSnapshot(paths);
 }
@@ -396,6 +612,15 @@ export async function setGlobalCompletionCheckConfig(
     })
     .where(eq(settings.id, 1))
     .run();
+
+  return loadSnapshot(paths);
+}
+
+export async function setMirrorEnabled(enabled: boolean) {
+  const paths = getLoopndrollPaths();
+  const { db } = getLoopndrollDatabase(paths.databasePath);
+
+  db.update(settings).set({ mirrorEnabled: enabled }).where(eq(settings.id, 1)).run();
 
   return loadSnapshot(paths);
 }

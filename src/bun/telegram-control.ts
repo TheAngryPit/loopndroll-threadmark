@@ -4,7 +4,7 @@ import { formatTelegramSessionLabel } from "./telegram-output";
 export function getTelegramRemotePromptDeliveryMode(
   preset: LoopPreset | null,
 ): "once" | "persistent" {
-  return preset === "await-reply" || preset === "passive" ? "once" : "persistent";
+  return preset === "await-reply" ? "once" : "persistent";
 }
 
 export function buildTelegramPromptReceivedText(input: {
@@ -13,7 +13,9 @@ export function buildTelegramPromptReceivedText(input: {
   title?: string | null;
 }) {
   const label = formatTelegramSessionLabel(input);
-  return label.length > 0 ? `Received for ${label}.` : "Received.";
+  return label.length > 0
+    ? `Reply queued for next Codex stop\n${label}`
+    : "Reply queued for next Codex stop.";
 }
 
 export function buildTelegramWorkingAckText(input: {
@@ -22,5 +24,5 @@ export function buildTelegramWorkingAckText(input: {
   title?: string | null;
 }) {
   const label = formatTelegramSessionLabel(input);
-  return label.length > 0 ? `Working on ${label}.` : "Working.";
+  return label.length > 0 ? `Reply delivered to Codex\n${label}` : "Reply delivered to Codex.";
 }

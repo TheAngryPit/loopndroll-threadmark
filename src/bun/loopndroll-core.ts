@@ -34,6 +34,7 @@ import {
   sessions,
   settings,
 } from "./db/schema";
+import { resolveSlackWebhookUrl, resolveTelegramBotToken } from "./secret-store";
 import { looksInternalThreadNameArtifact } from "./thread-name-artifact";
 
 export type HookHandler = {
@@ -61,6 +62,7 @@ export type LoopndrollPaths = {
   databasePath: string;
   managedHookPath: string;
   hookRemovalWatchLockPath: string;
+  startupRecoveryMarkerPath: string;
   hookDebugLogPath: string;
   codexDirectoryPath: string;
   codexConfigPath: string;
@@ -121,6 +123,7 @@ export function getLoopndrollPaths(): LoopndrollPaths {
     databasePath: join(appDirectoryPath, "app.db"),
     managedHookPath: join(appDirectoryPath, "bin", "loopndroll-hook"),
     hookRemovalWatchLockPath: join(appDirectoryPath, "state", "hook-removal-watch.lock"),
+    startupRecoveryMarkerPath: join(appDirectoryPath, "state", "startup-runtime.marker.json"),
     hookDebugLogPath: join(appDirectoryPath, "logs", "hooks-debug.jsonl"),
     codexDirectoryPath,
     codexConfigPath: join(codexDirectoryPath, "config.toml"),
@@ -474,11 +477,19 @@ export function createNotification(notification: CreateLoopNotificationInput): L
 }
 
 export function buildTelegramBotUrl(botToken: string) {
-  return `https://api.telegram.org/bot${botToken}/sendMessage`;
+  return `https://api.telegram.org/bot${resolveTelegramBotToken(botToken)}/sendMessage`;
 }
 
 export function buildTelegramApiUrl(botToken: string, method: string) {
-  return `https://api.telegram.org/bot${botToken}/${method}`;
+  return `https://api.telegram.org/bot${resolveTelegramBotToken(botToken)}/${method}`;
+}
+
+export function buildTelegramBotUrlForStorage(botTokenOrRef: string) {
+  return `https://api.telegram.org/bot${botTokenOrRef.trim()}/sendMessage`;
+}
+
+export function resolveSlackWebhookUrlForDelivery(webhookUrlOrRef: string) {
+  return resolveSlackWebhookUrl(webhookUrlOrRef);
 }
 
 function parseTelegramBotTokenFromUrl(botUrl: string | null) {
@@ -554,7 +565,7 @@ export function notificationInsertFromValue(
     webhookUrl: null,
     chatId: notification.chatId,
     botToken: notification.botToken,
-    botUrl: buildTelegramBotUrl(notification.botToken),
+    botUrl: buildTelegramBotUrlForStorage(notification.botToken),
     chatUsername: notification.chatUsername,
     chatDisplayName: notification.chatDisplayName,
     createdAt: notification.createdAt,
@@ -867,6 +878,7 @@ export function readSnapshotFromDatabase(): Omit<LoopndrollSnapshot, "health"> {
     globalCompletionCheckId: normalizedGlobalCompletionCheckId,
     globalCompletionCheckWaitForReply: settingsRow.globalCompletionCheckWaitForReply,
     hooksAutoRegistration: settingsRow.hooksAutoRegistration,
+    mirrorEnabled: settingsRow.mirrorEnabled,
     notifications: notificationRows.map(mapNotificationRow),
     completionChecks: completionCheckRows.map(mapCompletionCheckRow),
     hookLifecycle: parseHookLifecycleStatus(settingsRow.hookLifecycleStatusJson),

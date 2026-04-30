@@ -32,15 +32,20 @@ export function buildTelegramSessionListText(sessionsForChat: LoopSession[]) {
   return `Registered chats:\n${lines.join("\n")}${suffix}`;
 }
 
+function formatTelegramStatusSessionLabel(input: {
+  cwd?: string | null;
+  sessionRef?: string | null;
+  title?: string | null;
+}) {
+  return formatTelegramSessionLabel(input).replace("\nThread: ", " ");
+}
+
 function getLoopPresetLabel(preset: LoopPreset | null) {
   if (preset === "infinite") {
     return "Infinite";
   }
   if (preset === "await-reply") {
     return "Await Reply";
-  }
-  if (preset === "passive") {
-    return "Passive";
   }
   if (preset === "completion-checks") {
     return "Completion checks";
@@ -88,6 +93,10 @@ export function buildTelegramStatusText(
     hooksAutoRegistration: boolean;
   },
   sessionsForChat: LoopSession[],
+  bridgeStates: {
+    awaitingReplySessionIds?: ReadonlySet<string>;
+    queuedPromptSessionIds?: ReadonlySet<string>;
+  } = {},
 ) {
   const visibleSessions = sessionsForChat.filter((session) => !session.archived);
   const lines = [
@@ -120,12 +129,19 @@ export function buildTelegramStatusText(
         : session.presetSource === "off"
           ? "Off"
           : "Inherit global";
+    const bridgeState = bridgeStates.awaitingReplySessionIds?.has(session.sessionId)
+      ? "awaiting Telegram reply"
+      : bridgeStates.queuedPromptSessionIds?.has(session.sessionId)
+        ? "queued Telegram prompt"
+        : session.effectivePreset === "await-reply"
+          ? "waiting for next Codex stop"
+          : "no Telegram input waiting";
     lines.push(
-      `${formatTelegramSessionLabel({
+      `${formatTelegramStatusSessionLabel({
         cwd: session.cwd,
         sessionRef: session.sessionRef,
         title: threadName,
-      })}: ${presetLabel}`,
+      })}: ${presetLabel} - ${bridgeState}`,
     );
   }
 
@@ -144,24 +160,23 @@ export function buildTelegramHelpText() {
     "/reply C22 your message - Fallback: send a prompt to a specific chat",
     "/mode global infinite - Set the global preset to Infinite",
     "/mode global await - Set the global preset to Await Reply",
-    "/mode global passive - Set the global preset to Passive",
     "/mode global checks - Set the global preset to Completion checks",
     "/mode global off - Disable the global preset",
     "/mode C22 infinite - Set chat C22 to Infinite",
     "/mode C22 await - Set chat C22 to Await Reply",
-    "/mode C22 passive - Set chat C22 to Passive",
     "/mode C22 off - Stop chat C22",
-    "/failsafe C22 - Immediately disable passive/control for chat C22 and clear its pending prompts",
+    "/failsafe C22 - Immediately disable control for chat C22 and clear its pending prompts",
     "/failsafe all - Immediately disable the global mode, every chat mode, and all pending prompts",
     "",
     "Reply behavior:",
     "Reply directly to a Telegram notification to target that chat.",
     "Use /reply only as a fallback when you do not want to reply to the Telegram message directly.",
-    "Plain text without a command targets the latest waiting chat in this Telegram conversation.",
+    "Plain text targets the latest safe Telegram-linked chat when it has an active mode.",
+    "If that chat is Off, Loopndroll reports that nothing was delivered.",
+    "Loopndroll does not wake Codex in v1.",
     "",
     "Modes:",
     "Await Reply: sends a notification and keeps Codex waiting for your reply.",
-    "Passive: sends a notification, does not keep Codex waiting, but the next Telegram reply still queues the next prompt.",
     "Infinite: keeps sending a persistent prompt until you change the mode.",
     "Off: disables the preset for that chat or global default.",
     "",
@@ -170,10 +185,35 @@ export function buildTelegramHelpText() {
     "/status",
     "/reply C22 fix the failing test",
     "/mode global await",
-    "/mode C22 passive",
+    "/mode C22 await",
     "/failsafe C22",
     "/failsafe all",
     "/mode C22 off",
+  ].join("\n");
+}
+
+export function buildNoSafeActiveChannelText() {
+  return [
+    "Reply not delivered: no safe active channel",
+    "",
+    "Loopndroll v1 only accepts Telegram input when a hook-backed chat is active.",
+    "Reply to a Loopndroll notification, use /reply C2 your message, or run /status.",
+  ].join("\n");
+}
+
+export function buildNoActiveModeForTargetText(input: {
+  cwd?: string | null;
+  sessionRef?: string | null;
+  title?: string | null;
+}) {
+  return [
+    "Reply not delivered: chat is Off",
+    formatTelegramSessionLabel(input),
+    "",
+    "---------",
+    "",
+    "Loopndroll found this as the latest Telegram-linked chat, but it is Off.",
+    `Use /mode ${input.sessionRef ?? "C22"} await, then wait for the next Codex stop.`,
   ].join("\n");
 }
 
@@ -183,9 +223,6 @@ export function getModeCommandLabel(preset: LoopPreset | null) {
   }
   if (preset === "await-reply") {
     return "Await Reply";
-  }
-  if (preset === "passive") {
-    return "Passive";
   }
   if (preset === "completion-checks") {
     return "Completion checks";

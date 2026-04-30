@@ -15,6 +15,7 @@ import {
   deleteSession,
   ensureLoopndrollSetup,
   getLoopndrollState,
+  migrateNotificationSecretsToKeychain,
   pauseLoopndroll,
   registerHooks,
   resumeLoopndroll,
@@ -22,6 +23,7 @@ import {
   setGlobalCompletionCheckConfig,
   setGlobalNotification,
   setGlobalPreset,
+  setMirrorEnabled,
   setSessionArchived,
   setSessionNotifications,
   setLoopScope,
@@ -48,6 +50,7 @@ type UseLoopndrollStateResult = {
   }) => Promise<void>;
   removeNotification: (notificationId: string) => Promise<void>;
   removeCompletionCheck: (completionCheckId: string) => Promise<void>;
+  migrateSecrets: () => Promise<void>;
   updateScope: (scope: LoopScope) => Promise<void>;
   updateGlobalPreset: (preset: LoopPreset | null) => Promise<void>;
   updateGlobalNotification: (notificationId: string | null) => Promise<void>;
@@ -55,6 +58,7 @@ type UseLoopndrollStateResult = {
     completionCheckId: string | null,
     waitForReplyAfterCompletion: boolean,
   ) => Promise<void>;
+  updateMirrorEnabled: (enabled: boolean) => Promise<void>;
   updateSessionNotifications: (sessionId: string, notificationIds: string[]) => Promise<void>;
   updateSessionPreset: (sessionId: string, preset: LoopPreset | null) => Promise<void>;
   updateSessionCompletionCheckConfig: (
@@ -174,6 +178,9 @@ function createLoopndrollActions(
     removeCompletionCheck(completionCheckId: string) {
       return runMutation(() => deleteCompletionCheck(completionCheckId));
     },
+    migrateSecrets() {
+      return runMutation(() => migrateNotificationSecretsToKeychain());
+    },
     updateScope(scope: LoopScope) {
       return runMutation(() => setLoopScope(scope));
     },
@@ -190,6 +197,9 @@ function createLoopndrollActions(
       return runMutation(() =>
         setGlobalCompletionCheckConfig(completionCheckId, waitForReplyAfterCompletion),
       );
+    },
+    updateMirrorEnabled(enabled: boolean) {
+      return runMutation(() => setMirrorEnabled(enabled));
     },
     updateSessionNotifications(sessionId: string, notificationIds: string[]) {
       return runMutation(() => setSessionNotifications(sessionId, notificationIds));

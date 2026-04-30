@@ -663,21 +663,16 @@ const windowRpc = createWindowRpc();
 
 function registerStartupRecoveryCleanup() {
   let cleaned = false;
-  let shouldClearMarker = true;
   const cleanup = () => {
     if (cleaned) {
       return;
     }
     cleaned = true;
-    if (!shouldClearMarker) {
-      return;
-    }
     clearStartupRecoveryMarker();
   };
 
   process.once("exit", cleanup);
   process.once("SIGTERM", () => {
-    shouldClearMarker = false;
     cleanup();
     process.exit(0);
   });
